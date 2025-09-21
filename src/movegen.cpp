@@ -64,6 +64,68 @@ namespace {
         return moveList;
     }
 
+    // Urbino: Special move generation based on game phase
+    if (pos.urbino_gating() && pos.game_ply() >= 2)
+    {
+        // Move generation depends on game phase:
+        // Ply 2: Build only (already handled by calling code)
+        // Ply 3 after pass: Build only (no Architect moves)
+        // Ply 3+ otherwise: Normal 2-part moves (optional Architect move + building)
+
+        // Check if any buildings are on the board
+        bool has_buildings = pos.pieces(CUSTOM_PIECE_2) || pos.pieces(CUSTOM_PIECE_3) || pos.pieces(CUSTOM_PIECE_4);
+
+        // If this is ply 3 and no buildings on board (player 1 passed), only building placement allowed
+        if (pos.game_ply() == 3 && !has_buildings && from != to)
+        {
+            return moveList;  // No Architect moves allowed
+        }
+
+        // From ply 4 onward, or ply 3 if buildings exist (player 1 didn't pass), allow Architect moves
+        if (pos.game_ply() >= 4 || (pos.game_ply() >= 3 && has_buildings))
+        {
+            // Normal Urbino moves allowed (Architect can move)
+        }
+        else if (from != to)
+        {
+            // Before ply 3 (or ply 3 after pass), no Architect moves
+            return moveList;
+        }
+
+        // Generate moves with building placement
+        PieceType building_types[] = {CUSTOM_PIECE_2, CUSTOM_PIECE_3, CUSTOM_PIECE_4}; // House, Palace, Tower
+
+        // Safety check: with 79 destinations and 3 building types, we'd generate 237 moves per from square
+        // With 79 possible from squares for the architect, that's 18,723 moves total
+        // MAX_MOVES is only 8192, so we need to limit move generation
+        // For now, just generate moves for this specific architect move (from -> to)
+        // This gives us up to 237 moves per call, which is safe
+
+        for (PieceType bpt : building_types)
+        {
+            int count = pos.count_in_hand(us, bpt);
+            if (count > 0)
+            {
+                // Place building on any empty square after the (optional) Architect move
+                // If from == to: no move, empty_squares = all empty squares
+                // If from != to: Architect moves, empty_squares = empty after the move
+                Bitboard empty_squares = pos.board_bb() & ~((pos.pieces() ^ from) | to);
+
+                // TODO: Implement proper building placement restrictions
+                // For now, just place on first few empty squares for testing
+                int placement_count = 0;
+                while (empty_squares && placement_count < 5)  // Only generate 5 placements per building type for testing
+                {
+                    Square building_sq = pop_lsb(empty_squares);
+                    *moveList++ = make_gating<T>(from, to, bpt, building_sq);
+                    placement_count++;
+                }
+            }
+        }
+
+        return moveList;  // Always return after generating building placement moves
+    }
+
     *moveList++ = make<T>(from, to, pt);
 
     // Gating moves
@@ -299,6 +361,14 @@ namespace {
 
         Bitboard attacks = pos.attacks_from(Us, Pt, from);
         Bitboard quiets = pos.moves_from(Us, Pt, from);
+        
+        // Special handling for Urbino Architects - they can teleport to any empty square
+        if (pos.urbino_gating() && Pt == CUSTOM_PIECE_1)
+        {
+            attacks = Bitboard(0);  // Architects can't capture
+            quiets = pos.board_bb() & ~pos.pieces();  // Can teleport to any empty square
+        }
+        
         Bitboard b = (  (attacks & pos.pieces())
                        | (quiets & ~pos.pieces()));
         Bitboard b1 = b & target;
@@ -407,8 +477,52 @@ namespace {
             moveList = generate_moves<Us, Type>(pos, moveList, pop_lsb(ps), target);
         // generate drops
         if (pos.piece_drops() && Type != CAPTURES && (pos.can_drop(Us, ALL_PIECES) || pos.two_boards()))
-            for (PieceSet ps = pos.piece_types(); ps;)
-                moveList = generate_drops<Us, Type>(pos, moveList, pop_lsb(ps), target & ~pos.pieces(~Us));
+        {
+            // Special handling for Urbino
+            if (pos.urbino_gating())
+            {
+                if (pos.game_ply() < 2)
+                {
+                    // First move for each player: only drop Architect (CUSTOM_PIECE_1)
+                    moveList = generate_drops<Us, Type>(pos, moveList, CUSTOM_PIECE_1, target & ~pos.pieces(~Us));
+                }
+                else if (pos.game_ply() == 2)
+                {
+                    // Special third move: after both Architects are placed, first player can either:
+                    // 1. Place a building (no Architect move)
+                    // 2. Pass and let the opponent place the first building
+
+                    // Generate building placement move (no Architect movement)
+                    Square dummy_sq = SQ_A1;
+                    moveList = make_move_and_gating<NORMAL>(pos, moveList, Us, dummy_sq, dummy_sq);
+
+                    // Generate pass move (using SPECIAL move type with from == to)
+                    // Use the architect square for the pass move
+                    Square arch_sq = lsb(pos.pieces(Us, CUSTOM_PIECE_1));
+                    if (arch_sq != SQ_NONE)
+                        *moveList++ = make<SPECIAL>(arch_sq, arch_sq);
+                }
+                else if (pos.game_ply() == 3 && pos.pieces(CUSTOM_PIECE_2) == 0 && pos.pieces(CUSTOM_PIECE_3) == 0 && pos.pieces(CUSTOM_PIECE_4) == 0)
+                {
+                    // After a pass on ply 2, opponent can only place buildings (no Architect moves)
+                    Square dummy_sq = SQ_A1;
+                    moveList = make_move_and_gating<NORMAL>(pos, moveList, Us, dummy_sq, dummy_sq);
+                }
+                // After the special phase, buildings are placed via gating after Architect moves
+                else
+                {
+                    // Generate a single "building placement only" move (no Architect movement)
+                    // Use any arbitrary square for from/to since they'll be equal (no actual move)
+                    Square dummy_sq = SQ_A1;
+                    moveList = make_move_and_gating<NORMAL>(pos, moveList, Us, dummy_sq, dummy_sq);
+                }
+            }
+            else
+            {
+                for (PieceSet ps = pos.piece_types(); ps;)
+                    moveList = generate_drops<Us, Type>(pos, moveList, pop_lsb(ps), target & ~pos.pieces(~Us));
+            }
+        }
 
         // Castling with non-king piece
         if (!pos.count<KING>(Us) && Type != CAPTURES && pos.can_castle(Us & ANY_CASTLING))

@@ -190,6 +190,7 @@ public:
   bool wall_or_move() const;
   Bitboard walling_region(Color c) const;
   bool seirawan_gating() const;
+  bool urbino_gating() const;
   bool cambodian_moves() const;
   Bitboard diagonal_lines() const;
   bool pass(Color c) const;
@@ -864,6 +865,11 @@ inline Bitboard Position::walling_region(Color c) const {
 inline bool Position::seirawan_gating() const {
   assert(var != nullptr);
   return var->seirawanGating;
+}
+
+inline bool Position::urbino_gating() const {
+  assert(var != nullptr);
+  return var->urbinoGating;
 }
 
 inline bool Position::cambodian_moves() const {

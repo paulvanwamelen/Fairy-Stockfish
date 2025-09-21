@@ -1818,7 +1818,30 @@ namespace {
         v->nnueAlias = "janggi";
         return v;
     }
+#ifdef ALLVARS
+    // Urbino
+    // https://spielstein.com/games/urbino/rules
+    Variant* urbino_variant() {
+        Variant* v = chess_variant_base()->init();
+        v->maxRank = RANK_9;
+        v->maxFile = FILE_I;
+        v->reset_pieces();
+        v->add_piece(CUSTOM_PIECE_1, 'A', "");
+        v->add_piece(CUSTOM_PIECE_2, 'H', ""); // House (immobile)
+        v->add_piece(CUSTOM_PIECE_3, 'P', ""); // Palace (immobile)
+        v->add_piece(CUSTOM_PIECE_4, 'T', ""); // Tower (immobile)
+        v->startFen = "9/9/9/9/9/9/9/9/9[AHHHHHHHHHHHHHHHHHHTTTTTTPPPahhhhhhhhhhhhhhhhhhttttttppp] w - - 0 1";
+        v->variantTemplate = "urbino";
+        // In Urbino, first move places Architect, then Architect moves + building placement
+        v->pieceDrops = true;  // Enable piece drops for placing buildings
+        v->dropNoDoubled = CUSTOM_PIECE_1; // Can't drop multiple architects
+        v->gating = true;  // Enable gating for building placement
+        v->urbinoGating = true;  // Special Urbino gating rules
+        return v;
+    }
 #endif
+#endif
+
 
 } // namespace
 
@@ -1944,6 +1967,7 @@ void VariantMap::init() {
     add("flipello10", flipello10_variant());
 #ifdef ALLVARS
     add("amazons", amazons_variant());
+    add("urbino", urbino_variant());
 #endif
     add("xiangqi", xiangqi_variant());
     add("manchu", manchu_variant());
