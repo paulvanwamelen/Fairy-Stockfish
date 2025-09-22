@@ -95,30 +95,72 @@ namespace {
         // Generate moves with building placement
         PieceType building_types[] = {CUSTOM_PIECE_2, CUSTOM_PIECE_3, CUSTOM_PIECE_4}; // House, Palace, Tower
 
-        // Safety check: with 79 destinations and 3 building types, we'd generate 237 moves per from square
-        // With 79 possible from squares for the architect, that's 18,723 moves total
-        // MAX_MOVES is only 8192, so we need to limit move generation
-        // For now, just generate moves for this specific architect move (from -> to)
-        // This gives us up to 237 moves per call, which is safe
+        // Get architect positions after the move
+        // We need both architects to determine valid building placement squares
+        Bitboard architects_after_move = pos.pieces(CUSTOM_PIECE_1);
+
+        // If this call is for an architect move (from != to), update positions
+        if (from != to && pos.piece_on(from) == make_piece(us, CUSTOM_PIECE_1)) {
+            architects_after_move ^= from;  // Remove from old position
+            architects_after_move |= to;     // Add to new position
+        }
+
+        // Get the two architect squares
+        Square arch1 = lsb(architects_after_move);
+        Square arch2 = msb(architects_after_move);
+
+        // Calculate occupied squares after the architect move
+        Bitboard occupied_after_move = (pos.pieces() ^ from) | to;
+
+        // Calculate line of sight squares (intersection of architects' vision lines)
+        // Architects see like queens in chess but cannot see through buildings
+        // Use the existing queen attack generation which respects blockers
+        Bitboard arch1_vision = attacks_bb<QUEEN>(arch1, occupied_after_move);
+        Bitboard arch2_vision = attacks_bb<QUEEN>(arch2, occupied_after_move);
+
+        // Debug output (commented out for now)
+        /*
+        if (pos.game_ply() == 2) { // Only debug after both architects are placed
+            sync_cout << "DEBUG: Architect 1 at square " << arch1 << " sees " << popcount(arch1_vision) << " squares" << sync_endl;
+            sync_cout << "DEBUG: Architect 2 at square " << arch2 << " sees " << popcount(arch2_vision) << " squares" << sync_endl;
+            sync_cout << "DEBUG: Intersection has " << popcount(arch1_vision & arch2_vision) << " squares" << sync_endl;
+
+            // Check if architects are on the same line
+            if (rank_of(arch1) == rank_of(arch2)) {
+                sync_cout << "DEBUG: Architects on same rank!" << sync_endl;
+                sync_cout << "DEBUG: arch1 sees arch2? " << bool(arch1_vision & square_bb(arch2)) << sync_endl;
+                sync_cout << "DEBUG: arch2 sees arch1? " << bool(arch2_vision & square_bb(arch1)) << sync_endl;
+            }
+            else if (file_of(arch1) == file_of(arch2)) {
+                sync_cout << "DEBUG: Architects on same file!" << sync_endl;
+                sync_cout << "DEBUG: arch1 sees arch2? " << bool(arch1_vision & square_bb(arch2)) << sync_endl;
+                sync_cout << "DEBUG: arch2 sees arch1? " << bool(arch2_vision & square_bb(arch1)) << sync_endl;
+            }
+        }
+        */
+
+        // Buildings can only be placed at the intersection of both architects' lines of sight
+        Bitboard valid_placement_squares = arch1_vision & arch2_vision;
 
         for (PieceType bpt : building_types)
         {
             int count = pos.count_in_hand(us, bpt);
             if (count > 0)
             {
-                // Place building on any empty square after the (optional) Architect move
-                // If from == to: no move, empty_squares = all empty squares
-                // If from != to: Architect moves, empty_squares = empty after the move
-                Bitboard empty_squares = pos.board_bb() & ~((pos.pieces() ^ from) | to);
+                Bitboard placement_squares = valid_placement_squares;
 
-                // TODO: Implement proper building placement restrictions
-                // For now, just place on first few empty squares for testing
-                int placement_count = 0;
-                while (empty_squares && placement_count < 5)  // Only generate 5 placements per building type for testing
+                // Apply adjacency rules for palaces and towers
+                if (bpt == CUSTOM_PIECE_3) { // Palace
+                    placement_squares &= ~pos.urbino_excluded_palaces();
+                }
+                else if (bpt == CUSTOM_PIECE_4) { // Tower
+                    placement_squares &= ~pos.urbino_excluded_towers();
+                }
+
+                while (placement_squares)
                 {
-                    Square building_sq = pop_lsb(empty_squares);
+                    Square building_sq = pop_lsb(placement_squares);
                     *moveList++ = make_gating<T>(from, to, bpt, building_sq);
-                    placement_count++;
                 }
             }
         }

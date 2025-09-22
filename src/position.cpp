@@ -621,6 +621,29 @@ void Position::set_state(StateInfo* si) const {
   si->checkersBB = count<KING>(sideToMove) ? attackers_to(square<KING>(sideToMove), ~sideToMove) : Bitboard(0);
   si->move = MOVE_NONE;
 
+  // Initialize Urbino excluded squares based on existing palaces and towers
+  si->urbinoExcludedPalaces = 0;
+  si->urbinoExcludedTowers = 0;
+  if (urbino_gating())
+  {
+      // Find all palaces and mark orthogonally adjacent squares as excluded
+      for (Bitboard b = pieces(CUSTOM_PIECE_3); b; )
+      {
+          Square s = pop_lsb(b);
+          Bitboard orthogonal_adjacent = shift<NORTH>(square_bb(s)) | shift<SOUTH>(square_bb(s))
+                                       | shift<EAST>(square_bb(s)) | shift<WEST>(square_bb(s));
+          si->urbinoExcludedPalaces |= orthogonal_adjacent & board_bb();
+      }
+      // Find all towers and mark orthogonally adjacent squares as excluded
+      for (Bitboard b = pieces(CUSTOM_PIECE_4); b; )
+      {
+          Square s = pop_lsb(b);
+          Bitboard orthogonal_adjacent = shift<NORTH>(square_bb(s)) | shift<SOUTH>(square_bb(s))
+                                       | shift<EAST>(square_bb(s)) | shift<WEST>(square_bb(s));
+          si->urbinoExcludedTowers |= orthogonal_adjacent & board_bb();
+      }
+  }
+
   set_check_info(si);
 
   for (Bitboard b = pieces(); b; )
@@ -1961,6 +1984,25 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
       k ^= Zobrist::psq[gating_piece][gate];
       st->materialKey ^= Zobrist::psq[gating_piece][pieceCount[gating_piece]];
       st->nonPawnMaterial[us] += PieceValue[MG][gating_piece];
+
+      // Urbino: Update excluded squares when placing palaces or towers
+      if (urbino_gating())
+      {
+          if (gating_type(m) == CUSTOM_PIECE_3) { // Palace
+              // Palaces can't be orthogonally adjacent to other palaces
+              Bitboard orthogonal_adjacent = shift<NORTH>(square_bb(gate)) | shift<SOUTH>(square_bb(gate))
+                                           | shift<EAST>(square_bb(gate)) | shift<WEST>(square_bb(gate));
+              orthogonal_adjacent &= board_bb();
+              st->urbinoExcludedPalaces |= orthogonal_adjacent;
+          }
+          else if (gating_type(m) == CUSTOM_PIECE_4) { // Tower
+              // Towers can't be orthogonally adjacent to other towers
+              Bitboard orthogonal_adjacent = shift<NORTH>(square_bb(gate)) | shift<SOUTH>(square_bb(gate))
+                                           | shift<EAST>(square_bb(gate)) | shift<WEST>(square_bb(gate));
+              orthogonal_adjacent &= board_bb();
+              st->urbinoExcludedTowers |= orthogonal_adjacent;
+          }
+      }
   }
 
   // Remove gates

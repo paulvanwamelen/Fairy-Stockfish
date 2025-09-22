@@ -57,6 +57,10 @@ struct StateInfo {
   Bitboard wallSquares;
   Bitboard gatesBB[COLOR_NB];
 
+  // Urbino: squares where palaces/towers cannot be placed due to adjacency rules
+  Bitboard urbinoExcludedPalaces;
+  Bitboard urbinoExcludedTowers;
+
   // Not copied when making a move (will be recomputed anyhow)
   Key        key;
   Bitboard   checkersBB;
@@ -191,6 +195,8 @@ public:
   Bitboard walling_region(Color c) const;
   bool seirawan_gating() const;
   bool urbino_gating() const;
+  Bitboard urbino_excluded_palaces() const;
+  Bitboard urbino_excluded_towers() const;
   bool cambodian_moves() const;
   Bitboard diagonal_lines() const;
   bool pass(Color c) const;
@@ -870,6 +876,14 @@ inline bool Position::seirawan_gating() const {
 inline bool Position::urbino_gating() const {
   assert(var != nullptr);
   return var->urbinoGating;
+}
+
+inline Bitboard Position::urbino_excluded_palaces() const {
+  return st->urbinoExcludedPalaces;
+}
+
+inline Bitboard Position::urbino_excluded_towers() const {
+  return st->urbinoExcludedTowers;
 }
 
 inline bool Position::cambodian_moves() const {
