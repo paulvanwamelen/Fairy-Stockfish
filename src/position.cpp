@@ -3297,6 +3297,101 @@ void Position::flip() {
   assert(pos_is_ok());
 }
 
+void Position::urbino_scores(int& scoreW, int& scoreB, bool debug) const {
+    scoreW = 0;
+    scoreB = 0;
+    if (!urbino_gating()) return;
+
+    // Collect buildings and clamp to the actual board
+    Bitboard houses = pieces(CUSTOM_PIECE_2) & board_bb();
+    Bitboard palaces = pieces(CUSTOM_PIECE_3) & board_bb();
+    Bitboard towers  = pieces(CUSTOM_PIECE_4) & board_bb();
+    Bitboard all     = (houses | palaces | towers) & board_bb();
+
+    if (!all) return;
+
+    auto ortho = [&](Bitboard bb) {
+        // Expand one “ring” orthogonally, then clamp to board and to buildings
+        Bitboard n = shift<NORTH>(bb);
+        Bitboard s = shift<SOUTH>(bb);
+        Bitboard e = shift<EAST >(bb);
+        Bitboard w = shift<WEST >(bb);
+        return (n | s | e | w) & board_bb() & all;
+    };
+
+    Bitboard visited = 0;
+
+    while (Bitboard remaining = all & ~visited) {
+        Square seed = lsb(remaining);
+        Bitboard comp = 0, frontier = square_bb(seed);
+
+        // bitboard flood fill
+        while (frontier) {
+            comp    |= frontier;
+            Bitboard next = ortho(frontier) & ~comp;
+            frontier = next;
+        }
+
+        visited |= comp;
+
+        // Count which colors are present in this component
+        Bitboard compW = comp & pieces(WHITE);
+        Bitboard compB = comp & pieces(BLACK);
+        int colors = (!!compW) + (!!compB);
+
+        if (colors == 2) {
+            int districtCountWH = popcount(comp & (houses & pieces(WHITE)));
+            int districtCountBH = popcount(comp & (houses & pieces(BLACK)));
+            int districtCountWP = popcount(comp & (palaces & pieces(WHITE)));
+            int districtCountBP = popcount(comp & (palaces & pieces(BLACK)));
+            int districtCountWT = popcount(comp & (towers  & pieces(WHITE)));
+            int districtCountBT = popcount(comp & (towers  & pieces(BLACK)));
+            int districtScoreW = districtCountWH + 2*districtCountWP + 3*districtCountWT;
+            int districtScoreB = districtCountBH + 2*districtCountBP + 3*districtCountBT;
+            if (districtScoreW > districtScoreB) {
+                scoreW += districtScoreW;
+                if (debug) {
+                    sync_cout << "District: WHITE(" << districtScoreW << ") vs BLACK(" << districtScoreB << ") -> WHITE scores" << sync_endl;
+                }
+            } else if (districtScoreB > districtScoreW) {
+                scoreB += districtScoreB;
+                if (debug) {
+                    sync_cout << "District: WHITE(" << districtScoreW << ") vs BLACK(" << districtScoreB << ") -> BLACK scores" << sync_endl;
+                }
+            } else {
+                if (districtCountWT > districtCountBT) {
+                    scoreW += districtScoreW;
+                    if (debug) {
+                        sync_cout << "District: WHITE(" << districtScoreW << ") vs BLACK(" << districtScoreB << ") -> WHITE scores (tower tiebreak)" << sync_endl;
+                    }
+                } else if (districtCountBT > districtCountWT) {
+                    scoreB += districtScoreB;
+                    if (debug) {
+                        sync_cout << "District: WHITE(" << districtScoreW << ") vs BLACK(" << districtScoreB << ") -> BLACK scores (tower tiebreak)" << sync_endl;
+                    }
+                } else if (districtCountWP > districtCountBP) {
+                    scoreW += districtScoreW;
+                    if (debug) {
+                        sync_cout << "District: WHITE(" << districtScoreW << ") vs BLACK(" << districtScoreB << ") -> WHITE scores (palace tiebreak)" << sync_endl;
+                    }
+                } else if (districtCountBP > districtCountWP) {
+                    scoreB += districtScoreB;
+                    if (debug) {
+                        sync_cout << "District: WHITE(" << districtScoreW << ") vs BLACK(" << districtScoreB << ") -> BLACK scores (palace tiebreak)" << sync_endl;
+                    }
+                } else {
+                    // Perfect tie, no points
+                    if (debug) {
+                        sync_cout << "District: WHITE(" << districtScoreW << ") vs BLACK(" << districtScoreB << ") -> no score (perfect tie)" << sync_endl;
+                    }
+                }
+            }
+        }
+    }
+    if (debug) {
+        sync_cout << "Total Urbino scores: WHITE(" << scoreW << ") BLACK(" << scoreB << ")" << sync_endl;
+    }
+}
 
 /// Position::pos_is_ok() performs some consistency checks for the
 /// position object and raises an asserts if something wrong is detected.

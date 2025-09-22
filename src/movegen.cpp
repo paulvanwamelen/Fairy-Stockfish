@@ -100,7 +100,8 @@ namespace {
         Bitboard architects_after_move = pos.pieces(CUSTOM_PIECE_1);
 
         // If this call is for an architect move (from != to), update positions
-        if (from != to && pos.piece_on(from) == make_piece(us, CUSTOM_PIECE_1)) {
+        // if (from != to && pos.piece_on(from) == make_piece(us, CUSTOM_PIECE_1)) {
+        if (from != to) {
             architects_after_move ^= from;  // Remove from old position
             architects_after_move |= to;     // Add to new position
         }
@@ -140,7 +141,8 @@ namespace {
         */
 
         // Buildings can only be placed at the intersection of both architects' lines of sight
-        Bitboard valid_placement_squares = arch1_vision & arch2_vision;
+        // Exclude occupied squares - buildings cannot be placed on existing pieces
+        Bitboard valid_placement_squares = arch1_vision & arch2_vision & ~occupied_after_move;
 
         for (PieceType bpt : building_types)
         {
@@ -395,7 +397,13 @@ namespace {
 
     assert(Pt != KING && Pt != PAWN);
 
-    Bitboard bb = pos.pieces(Us, Pt);
+    // For Urbino architects (shared pieces), get pieces of both colors
+    Bitboard bb;
+    if (pos.urbino_gating() && Pt == CUSTOM_PIECE_1) {
+        bb = pos.pieces(CUSTOM_PIECE_1);  // Get architects of both colors
+    } else {
+        bb = pos.pieces(Us, Pt);  // Normal pieces - just our color
+    }
 
     while (bb)
     {

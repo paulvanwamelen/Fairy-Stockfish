@@ -389,6 +389,23 @@ void UCI::loop(int argc, char* argv[]) {
       else if (token == "bench")    bench(pos, is, states);
       else if (token == "d")        sync_cout << pos << sync_endl;
       else if (token == "eval")     trace_eval(pos);
+      else if (token == "urbino" && pos.urbino_gating()) {
+          // Show Urbino scores
+          int scoreW, scoreB;
+          pos.urbino_scores(scoreW, scoreB, false);
+          sync_cout << "\nUrbino Scores:" << sync_endl;
+          sync_cout << "  White: " << scoreW << sync_endl;
+          sync_cout << "  Black: " << scoreB << sync_endl;
+          /*
+          sync_cout << "  Result: ";
+          if (white_score > black_score)
+              sync_cout << "White wins" << sync_endl;
+          else if (black_score > white_score)
+              sync_cout << "Black wins" << sync_endl;
+          else
+              sync_cout << "Draw" << sync_endl;
+          */
+      }
       else if (token == "compiler") sync_cout << compiler_info() << sync_endl;
       else if (token == "export_net")
       {

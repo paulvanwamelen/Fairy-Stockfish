@@ -1837,6 +1837,7 @@ namespace {
         v->dropNoDoubled = CUSTOM_PIECE_1; // Can't drop multiple architects
         v->gating = true;  // Enable gating for building placement
         v->urbinoGating = true;  // Special Urbino gating rules
+        v->materialCounting = URBINO_MATERIAL;  // Use district-based scoring
         return v;
     }
 #endif

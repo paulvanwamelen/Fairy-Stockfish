@@ -197,6 +197,7 @@ public:
   bool urbino_gating() const;
   Bitboard urbino_excluded_palaces() const;
   Bitboard urbino_excluded_towers() const;
+  void urbino_scores(int& white_score, int& black_score, bool debug = false) const;
   bool cambodian_moves() const;
   Bitboard diagonal_lines() const;
   bool pass(Color c) const;
@@ -1631,6 +1632,18 @@ inline Value Position::material_counting_result() const {
       break;
   case BLACK_DRAW_ODDS:
       result = -VALUE_MATE;
+      break;
+  case URBINO_MATERIAL:
+      {
+          int scoreW, scoreB;
+          urbino_scores(scoreW, scoreB, false);
+          if (scoreW > scoreB)
+              result = VALUE_MATE;
+          else if (scoreB > scoreW)
+              result = -VALUE_MATE;
+          else
+              result = VALUE_DRAW;
+      }
       break;
   default:
       assert(false);
