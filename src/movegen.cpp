@@ -159,10 +159,16 @@ namespace {
                     placement_squares &= ~pos.urbino_excluded_towers();
                 }
 
+                // Apply the one-neighborhood-per-color rule
+
+
                 while (placement_squares)
                 {
                     Square building_sq = pop_lsb(placement_squares);
-                    *moveList++ = make_gating<T>(from, to, bpt, building_sq);
+                    bool isLegal = pos.urbino_legal_build(us, building_sq);
+                    assert(isLegal == pos.urbino_legal_build_slow(us, building_sq)); // Sanity check
+                    if (isLegal)
+                        *moveList++ = make_gating<T>(from, to, bpt, building_sq);
                 }
             }
         }

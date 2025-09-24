@@ -48,7 +48,6 @@ namespace Zobrist {
   Key endgame[EG_EVAL_NB];
 }
 
-
 /// operator<<(Position) returns an ASCII representation of the position
 
 std::ostream& operator<<(std::ostream& os, const Position& pos) {
@@ -624,22 +623,22 @@ void Position::set_state(StateInfo* si) const {
   // Initialize Urbino excluded squares based on existing palaces and towers
   si->urbinoExcludedPalaces = 0;
   si->urbinoExcludedTowers = 0;
+  // si->urbinoUndo
   if (urbino_gating())
   {
       // Find all palaces and mark orthogonally adjacent squares as excluded
       for (Bitboard b = pieces(CUSTOM_PIECE_3); b; )
       {
-          Square s = pop_lsb(b);
-          Bitboard orthogonal_adjacent = shift<NORTH>(square_bb(s)) | shift<SOUTH>(square_bb(s))
-                                       | shift<EAST>(square_bb(s)) | shift<WEST>(square_bb(s));
+          Bitboard s = square_bb(pop_lsb(b));
+          Bitboard orthogonal_adjacent = shift<NORTH>(s) | shift<SOUTH>(s) | shift<EAST>(s) | shift<WEST>(s);
           si->urbinoExcludedPalaces |= orthogonal_adjacent & board_bb();
       }
       // Find all towers and mark orthogonally adjacent squares as excluded
       for (Bitboard b = pieces(CUSTOM_PIECE_4); b; )
       {
-          Square s = pop_lsb(b);
-          Bitboard orthogonal_adjacent = shift<NORTH>(square_bb(s)) | shift<SOUTH>(square_bb(s))
-                                       | shift<EAST>(square_bb(s)) | shift<WEST>(square_bb(s));
+          Bitboard s = square_bb(pop_lsb(b));
+          Bitboard orthogonal_adjacent = shift<NORTH>(s) | shift<SOUTH>(s)
+                                       | shift<EAST>(s) | shift<WEST>(s);
           si->urbinoExcludedTowers |= orthogonal_adjacent & board_bb();
       }
   }
@@ -1988,19 +1987,25 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
       // Urbino: Update excluded squares when placing palaces or towers
       if (urbino_gating())
       {
-          if (gating_type(m) == CUSTOM_PIECE_3) { // Palace
+          PieceType gatingType = gating_type(m);
+          if (gatingType == CUSTOM_PIECE_3) { // Palace
               // Palaces can't be orthogonally adjacent to other palaces
               Bitboard orthogonal_adjacent = shift<NORTH>(square_bb(gate)) | shift<SOUTH>(square_bb(gate))
                                            | shift<EAST>(square_bb(gate)) | shift<WEST>(square_bb(gate));
               orthogonal_adjacent &= board_bb();
               st->urbinoExcludedPalaces |= orthogonal_adjacent;
           }
-          else if (gating_type(m) == CUSTOM_PIECE_4) { // Tower
+          else if (gatingType == CUSTOM_PIECE_4) { // Tower
               // Towers can't be orthogonally adjacent to other towers
               Bitboard orthogonal_adjacent = shift<NORTH>(square_bb(gate)) | shift<SOUTH>(square_bb(gate))
                                            | shift<EAST>(square_bb(gate)) | shift<WEST>(square_bb(gate));
               orthogonal_adjacent &= board_bb();
               st->urbinoExcludedTowers |= orthogonal_adjacent;
+          }
+
+          // Update blocks and adjacencies after placing a building
+          if (gatingType == CUSTOM_PIECE_2 || gatingType == CUSTOM_PIECE_3 || gatingType == CUSTOM_PIECE_4) {
+              urbino_update_blocks(gate, us, gatingType, st->urbinoUndo);
           }
       }
   }
@@ -2301,6 +2306,10 @@ void Position::undo_move(Move m) {
       }
   }
 
+  if (urbino_gating())
+  {
+      undo_move_urbino();
+  }
   // Finally point our state pointer back to the previous state
   st = st->previous;
   --gamePly;
@@ -3391,6 +3400,253 @@ void Position::urbino_scores(int& scoreW, int& scoreB, bool debug) const {
     if (debug) {
         sync_cout << "Total Urbino scores: WHITE(" << scoreW << ") BLACK(" << scoreB << ")" << sync_endl;
     }
+}
+
+bool Position::urbino_legal_build_slow(Color us, Square s) const {
+    // 0) Only relevant in Urbino
+    if (!urbino_gating()) return true;
+
+    const Color them = ~us;
+    const Bitboard allBld = (pieces(CUSTOM_PIECE_2) | pieces(CUSTOM_PIECE_3) | pieces(CUSTOM_PIECE_4)) & board_bb();
+    const Bitboard nbr = (shift<NORTH>(square_bb(s)) | shift<SOUTH>(square_bb(s)) |
+                          shift<EAST >(square_bb(s)) | shift<WEST >(square_bb(s))) & board_bb();
+
+    // 1) Find the district union that would be merged by placing on s:
+    //    Start from any *building* orth-adjacent to s and flood over 'allBld'.
+    Bitboard frontier = nbr & allBld;
+    if (!frontier) {
+        // s does not touch any district → new 1-color district with our piece only. Always OK
+        return true;
+    }
+    Bitboard merged = 0;
+    auto ortho = [&](Bitboard bb){ 
+        return (shift<NORTH>(bb)|shift<SOUTH>(bb)|shift<EAST>(bb)|shift<WEST>(bb)) & board_bb() & allBld;
+    };
+    while (frontier) {
+        merged |= frontier;
+        frontier = ortho(frontier) & ~merged;
+    }
+
+    // 2) Count enemy blocks that would end up inside the merged district.
+    //    If two or more enemy components already exist there, the move would create
+    //    a district with >1 enemy block → illegal.
+    auto count_components = [&](Bitboard compSet){
+        int cnt = 0;
+        Bitboard rest = compSet & merged;
+        while (rest){
+            Bitboard seed = rest & -rest;
+            Bitboard fill = seed;
+            while (true){
+                Bitboard next = ortho(fill) & compSet & merged & ~fill;
+                if (!next) break;
+                fill |= next;
+            }
+            rest &= ~fill;
+            ++cnt;
+            if (cnt > 1) break;
+        }
+        return cnt;
+    };
+    if (count_components(pieces(them)) > 1) return false;
+
+    // 3) Now our own blocks: we place a stone on 's' (of color 'us').
+    //    Legal iff *all* our blocks inside 'merged' become one after adding 's'.
+    //    That happens exactly when every existing our-block in 'merged' touches s
+    //    through orth adjacency (so s connects them), AND there isn’t some other
+    //    our-block elsewhere in 'merged' that does not touch s.
+    Bitboard oursInMerged = merged & pieces(us);
+    if (!oursInMerged) return true;                 // first block for us in this district
+    Bitboard oursTouchS  = nbr & oursInMerged;      // blocks we actually connect to
+    if (!oursTouchS) return false;                  // we'd create a new separate block
+
+    // Flood from the touching set *within our color only* and check if anything remains
+    auto flood_us = [&](Bitboard seed){
+        Bitboard grp = seed;
+        Bitboard fr  = seed;
+        while (fr){
+            Bitboard next = ortho(fr) & oursInMerged & ~grp;
+            fr = next;
+            grp |= next;
+        }
+        return grp;
+    };
+    Bitboard connectedViaS = flood_us(oursTouchS);
+    // If there exists any of our buildings inside merged but outside the component
+    // that s connects to, we'd have ≥2 our-blocks in the new district.
+    return ( (oursInMerged & ~connectedViaS) == 0 );
+}
+
+bool Position::urbino_legal_build(Color us, Square s) const {
+    int adj[4], k=0; // dedup district ids around s
+    for_each_orth_neighbor(s, [&](int t){
+        int id = urbinoDistId[t];
+        if (id>=0 && urbinoDistricts[id].alive && std::find(adj, adj+k, id)==adj+k){
+            adj[k++] = id;
+        }
+    });
+    if (k==0) return true; // new 1-color district with our piece only. Always OK
+
+    // Opponent: must not appear in ≥2 adj districts
+    Color them = ~us;
+    int opp = 0; for (int i=0;i<k;i++) opp += urbinoDistricts[adj[i]].hasBlock[them];
+    if (opp > 1) return false;
+
+    // Ours: if we appear, s must be adjacent to every our-block among adj districts
+    int mine = 0; Bitboard touch = 0;
+    Bitboard myNbr = (shift<NORTH>(square_bb(s))|shift<SOUTH>(square_bb(s))|
+                      shift<EAST >(square_bb(s))|shift<WEST >(square_bb(s))) & pieces(us);
+    for (int i=0;i<k;i++){
+        if (urbinoDistricts[adj[i]].hasBlock[us]){
+            ++mine;
+            if (myNbr & urbinoDistricts[adj[i]].colorMask[us]) // touches that district’s block?
+                touch |= 1;
+            else
+                return false; // we'd introduce a second our-block
+        }
+    }
+    return true; // either mine==0 or we touch every our-block
+}
+
+/*
+void Position::urbino_update_blocks(Square building_sq) {
+    // This function updates blocks after a building has been placed
+    // It only needs to consider the district containing the newly placed building
+
+    // Get all buildings
+    Bitboard all_buildings = pieces(CUSTOM_PIECE_2) | pieces(CUSTOM_PIECE_3) | pieces(CUSTOM_PIECE_4);
+    Bitboard white_buildings = all_buildings & pieces(WHITE);
+    Bitboard black_buildings = all_buildings & pieces(BLACK);
+
+    Bitboard district = 0, frontier = square_bb(building_sq);
+
+    // bitboard flood fill
+    while (frontier) {
+        district |= frontier;
+        frontier = (shift<NORTH>(frontier) | shift<SOUTH>(frontier) | shift<EAST>(frontier) | shift<WEST>(frontier)) & board_bb() & all_buildings & ~district;
+    }
+
+    // Check if this district has both colors
+    Bitboard white_in_district = district & white_buildings;
+    Bitboard black_in_district = district & black_buildings;
+
+    if (white_in_district && black_in_district) {
+        // This is a 2-color district, update blocks
+        st->urbinoWhiteBlocks |= white_in_district;
+        st->urbinoBlackBlocks |= black_in_district;
+
+        // Update adjacencies for this district
+        Bitboard white_adj = shift<NORTH>(white_in_district) | shift<SOUTH>(white_in_district)
+                           | shift<EAST>(white_in_district) | shift<WEST>(white_in_district);
+        st->urbinoWhiteAdjacent |= white_adj & board_bb() & ~all_buildings;
+
+        Bitboard black_adj = shift<NORTH>(black_in_district) | shift<SOUTH>(black_in_district)
+                           | shift<EAST>(black_in_district) | shift<WEST>(black_in_district);
+        st->urbinoBlackAdjacent |= black_adj & board_bb() & ~all_buildings;
+    }
+}
+*/
+
+void Position::urbino_update_blocks(Square s, Color c, PieceType pt, UrbinoUndo& u) {
+    u.oldScoreW = urbinoScoreW; u.oldScoreB = urbinoScoreB;
+
+    // 1) Gather unique adjacent district IDs
+    int adj[4]; int k=0;
+    for_each_orth_neighbor(s, [&](int t){
+        int id = urbinoDistId[t];
+        if (id>=0){
+            bool seen=false; for(int i=0;i<k;i++) if (adj[i]==id) { seen=true; break; }
+            if (!seen) adj[k++] = id;
+        }
+    });
+
+    // 2) Create the new/expanded district descriptor
+    UrbinoDistrict newD; newD.alive = true;
+    newD.mask = square_bb(s); // single bit
+    
+    urbino_add_piece(newD.t, c, pt);
+
+    // 3) If we’re merging existing districts, subtract their scores and union masks & counts
+    for (int i=0;i<k;i++){
+        int id = adj[i];
+        u.mergedSnap[i] = urbinoDistricts[id];           // snapshot for undo
+        u.mergedIds[i]  = id;
+        ++u.mergedCount;
+
+        urbino_sub_score(urbinoDistricts[id].t, urbinoScoreW, urbinoScoreB);
+        newD.mask |= urbinoDistricts[id].mask;           // union area
+        newD.colorMask[WHITE] |= urbinoDistricts[id].colorMask[WHITE];
+        newD.colorMask[BLACK] |= urbinoDistricts[id].colorMask[BLACK];
+        newD.t.wH += urbinoDistricts[id].t.wH; newD.t.wP += urbinoDistricts[id].t.wP; newD.t.wT += urbinoDistricts[id].t.wT;
+        newD.t.bH += urbinoDistricts[id].t.bH; newD.t.bP += urbinoDistricts[id].t.bP; newD.t.bT += urbinoDistricts[id].t.bT;
+
+        urbinoDistricts[id].alive = false;               // mark slot free; mapping will be overwritten below
+    }
+    newD.hasBlock[WHITE] = !!(newD.colorMask[WHITE]);
+    newD.hasBlock[BLACK] = !!(newD.colorMask[BLACK]);
+
+    // 4) Allocate a district id (reuse first freed or push_back)
+    int newId = -1;
+    for (int i=0;i<(int)urbinoDistricts.size();++i) if (!urbinoDistricts[i].alive){ newId = i; break; }
+    if (newId==-1){ newId = (int)urbinoDistricts.size(); urbinoDistricts.push_back({}); }
+
+    // 5) Assign squares in the new union to newId (update mapping)
+    //    Iterate bits in newD.mask; record for undo
+    Bitboard m = newD.mask;
+    while (m){
+        int q = pop_lsb(m);          // 0..80
+        if (urbinoDistId[q] != newId){           // remember only changes
+            u.reassigned[u.reCount++] = q;
+            urbinoDistId[q] = newId;
+        }
+    }
+
+    // 6) Finalize & add its score
+    urbino_compute_points(newD.t);
+    urbino_add_score(newD.t, urbinoScoreW, urbinoScoreB);
+
+    // 7) Store
+    urbinoDistricts[newId] = newD;
+    u.newId  = newId;
+    u.newSnap = newD;
+}
+
+void Position::undo_move_urbino() {
+    const UrbinoUndo& u = st->urbinoUndo;
+
+    // 3) Remove the new union district and roll back scores
+    if (u.newId >= 0 && urbinoDistricts[u.newId].alive) {
+        // Subtract its points
+        if (u.newSnap.t.owner == WHITE) urbinoScoreW -= u.newSnap.t.pts;
+        else if (u.newSnap.t.owner == BLACK) urbinoScoreB -= u.newSnap.t.pts;
+
+        urbinoDistricts[u.newId].alive = false;
+    }
+
+    // 4) Restore distId mapping for all reassigned squares
+    for (int i = 0; i < u.reCount; ++i)
+        urbinoDistId[u.reassigned[i]] = -1; // will be set by merged snapshots below
+
+    // 5) Restore each merged district’s snapshot (mask, tallies, alive)
+    for (int i = 0; i < u.mergedCount; ++i) {
+        int id = u.mergedIds[i];
+        urbinoDistricts[id] = u.mergedSnap[i];
+        urbinoDistricts[id].alive = true;
+
+        // Re-assign squares for this district id
+        Bitboard m = urbinoDistricts[id].mask;
+        while (m) {
+            int q = pop_lsb(m);
+            urbinoDistId[q] = id;
+        }
+
+        // Re-add its score contribution
+        if (urbinoDistricts[id].t.owner == WHITE) urbinoScoreW += urbinoDistricts[id].t.pts;
+        else if (urbinoDistricts[id].t.owner == BLACK) urbinoScoreB += urbinoDistricts[id].t.pts;
+    }
+
+    // 6) (Optional) Restore totals exactly
+    assert(urbinoScoreW == u.oldScoreW && urbinoScoreB == u.oldScoreB);
+
 }
 
 /// Position::pos_is_ok() performs some consistency checks for the

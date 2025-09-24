@@ -36,6 +36,37 @@
 
 namespace Stockfish {
 
+// Urbino structures - defined before StateInfo since they're used there
+struct UrbinoDistTally {
+    int wH=0, wP=0, wT=0, bH=0, bP=0, bT=0; // counts by color & type
+    // Derived fields (filled by compute_points()):
+    int owner = -1; // 0 = white, 1 = black, -1 = no one (tie or one-color)
+    int pts   = 0;  // points credited to owner for this district
+};
+
+struct UrbinoDistrict {
+    Bitboard mask{};        // all squares in this district
+    UrbinoDistTally t{};
+    bool hasBlock[2];       // per color
+    Bitboard colorMask[2];  // per color
+    bool alive = false;
+};
+
+struct UrbinoUndo {
+    // enough to reverse any merge
+    int oldScoreW, oldScoreB;
+    // All district ids that were merged away:
+    std::array<int,4> mergedIds; int mergedCount=0;
+    // The new district id (or -1 if we created none):
+    int newId=-1;
+    // Snapshots to restore (mask + tallies) of merged ones:
+    std::array<UrbinoDistrict,4> mergedSnap;
+    // Snapshot of the newly created/expanded district to remove on undo:
+    UrbinoDistrict newSnap;
+    // Squares we reassigned → compact list for quick undo
+    std::array<int,81> reassigned; int reCount=0;
+};
+
 /// StateInfo struct stores information needed to restore a Position object to
 /// its previous state when we retract a move. Whenever a move is made on the
 /// board (by calling Position::do_move), a StateInfo object must be passed.
@@ -91,6 +122,8 @@ struct StateInfo {
   // Used by NNUE
   Eval::NNUE::Accumulator accumulator;
   DirtyPiece dirtyPiece;
+  
+  UrbinoUndo urbinoUndo;
 };
 
 
@@ -99,7 +132,6 @@ struct StateInfo {
 /// 'draw by repetition' detection. Use a std::deque because pointers to
 /// elements are not invalidated upon list resizing.
 typedef std::unique_ptr<std::deque<StateInfo>> StateListPtr;
-
 
 /// Position class stores information regarding the board representation as
 /// pieces, side to move, hash keys, castling info, etc. Important methods are
@@ -198,6 +230,16 @@ public:
   Bitboard urbino_excluded_palaces() const;
   Bitboard urbino_excluded_towers() const;
   void urbino_scores(int& white_score, int& black_score, bool debug = false) const;
+  void add_piece(UrbinoDistTally& t, Color c, PieceType pt);
+  void urbino_update_blocks(Square s, Color c, PieceType pt, UrbinoUndo& u);
+  void undo_move_urbino();
+  bool urbino_legal_build_slow(Color us, Square s) const;
+  bool urbino_legal_build(Color us, Square s) const;
+  void urbino_add_piece(UrbinoDistTally& t, Color c, PieceType pt);
+  void urbino_sub_score(const UrbinoDistTally& t, int& SW, int& SB);
+  void urbino_add_score(const UrbinoDistTally& t, int& SW, int& SB);
+  inline void urbino_compute_points(UrbinoDistTally& t);
+  template <class Fn> inline void for_each_orth_neighbor(Square s, Fn&& fn) const;
   bool cambodian_moves() const;
   Bitboard diagonal_lines() const;
   bool pass(Color c) const;
@@ -396,6 +438,15 @@ private:
   void drop_piece(Piece pc_hand, Piece pc_drop, Square s);
   void undrop_piece(Piece pc_hand, Square s);
   Bitboard find_drop_region(Direction dir, Square s, Bitboard occupied) const;
+  
+  // Urbino: For every board square, which district does it belong to? -1 = empty.
+  std::array<int8_t, 81> urbinoDistId; // index by 0..80 laid out row-major
+
+  // Urbino: Pool of districts; reuse slots on merge.
+  std::vector<UrbinoDistrict> urbinoDistricts; // size ≤ 81
+
+  // Urbino: Running totals:
+  int urbinoScoreW = 0, urbinoScoreB = 0;
 };
 
 extern std::ostream& operator<<(std::ostream& os, const Position& pos);
@@ -885,6 +936,46 @@ inline Bitboard Position::urbino_excluded_palaces() const {
 
 inline Bitboard Position::urbino_excluded_towers() const {
   return st->urbinoExcludedTowers;
+}
+
+inline void Position::urbino_add_piece(UrbinoDistTally& t, Color c, PieceType pt){
+    int* p = nullptr;
+    if (c==WHITE) p = (pt==CUSTOM_PIECE_2)? &t.wH : (pt==CUSTOM_PIECE_3)? &t.wP : &t.wT;
+    else          p = (pt==CUSTOM_PIECE_2)? &t.bH : (pt==CUSTOM_PIECE_3)? &t.bP : &t.bT;
+    ++(*p);
+}
+
+inline void Position::urbino_sub_score(const UrbinoDistTally& t, int& SW, int& SB){
+    if (t.owner==0) SW -= t.pts;
+    else if (t.owner==1) SB -= t.pts;
+}
+
+inline void Position::urbino_add_score(const UrbinoDistTally& t, int& SW, int& SB){
+    if (t.owner==0) SW += t.pts;
+    else if (t.owner==1) SB += t.pts;
+}
+
+inline void Position::urbino_compute_points(UrbinoDistTally& t){
+    const int vW = t.wH + 2*t.wP + 3*t.wT;
+    const int vB = t.bH + 2*t.bP + 3*t.bT;
+    if ((vW==0 && vB>0) || (vB==0 && vW>0)) { t.owner=-1; t.pts=0; return; } // one-color → no score
+    if (vW > vB) { t.owner=0; t.pts=vW; return; }
+    if (vB > vW) { t.owner=1; t.pts=vB; return; }
+    // tie-break: towers, then palaces, then houses
+    if (t.wT != t.bT) { t.owner = (t.wT > t.bT) ? 0 : 1; t.pts = vW; return; }
+    if (t.wP != t.bP) { t.owner = (t.wP > t.bP) ? 0 : 1; t.pts = vW; return; }
+    if (t.wH != t.bH) { t.owner = (t.wH > t.bH) ? 0 : 1; t.pts = vW; return; }
+    t.owner = -1; t.pts = 0;
+}
+
+template <class Fn>
+inline void Position::for_each_orth_neighbor(Square s, Fn&& fn) const {
+    const File f = file_of(s);
+    const Rank r = rank_of(s);
+    if (r < max_rank()) fn(Square(s + NORTH));
+    if (r > RANK_1)     fn(Square(s + SOUTH));
+    if (f < max_file()) fn(Square(s + EAST));
+    if (f > FILE_A)     fn(Square(s + WEST));
 }
 
 inline bool Position::cambodian_moves() const {
