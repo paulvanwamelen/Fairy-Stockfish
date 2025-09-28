@@ -123,15 +123,30 @@ namespace {
   template<bool Root>
   uint64_t perft(Position& pos, Depth depth) {
 
+    // if (Root) {
+    //     sync_cout << "DEBUG perft entry: total_pieces=" << popcount(pos.pieces())
+    //               << " houses=" << popcount(pos.pieces(CUSTOM_PIECE_2))
+    //               << " depth=" << depth << sync_endl;
+    // }
+
     StateInfo st;
     ASSERT_ALIGNED(&st, Eval::NNUE::CacheLineSize);
 
     uint64_t cnt, nodes = 0;
     const bool leaf = (depth == 2);
 
+    // if (Root) {
+    //     sync_cout << "DEBUG perft before MoveList: total_pieces=" << popcount(pos.pieces())
+    //               << " houses=" << popcount(pos.pieces(CUSTOM_PIECE_2)) << sync_endl;
+    // }
+
     for (const auto& m : MoveList<LEGAL>(pos))
     {
-        assert(pos.pseudo_legal(m));
+        // if (Root) {
+        //     sync_cout << "DEBUG perft in loop: total_pieces=" << popcount(pos.pieces())
+        //               << " houses=" << popcount(pos.pieces(CUSTOM_PIECE_2)) << sync_endl;
+        // }
+        assert(pos.pseudo_legal(m)); // for urbino, in debug mode, this generates (nearly) all moves again!
         if (Root && depth <= 1)
             cnt = 1, nodes++;
         else

@@ -41,6 +41,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <algorithm>
+#include <iostream>
 
 #if defined(_MSC_VER)
 // Disable some silly and noisy warning from MSVC compiler
@@ -857,7 +858,12 @@ inline bool is_custom(PieceType pt) {
 }
 
 inline bool is_ok(Move m) {
-  return from_sq(m) != to_sq(m) || type_of(m) == PROMOTION || type_of(m) == SPECIAL; // Catch MOVE_NULL and MOVE_NONE
+  bool ok = from_sq(m) != to_sq(m) || type_of(m) == PROMOTION || type_of(m) == SPECIAL; // Catch MOVE_NULL and MOVE_NONE
+  if (!ok) {
+    std::cerr << "is_ok() failed for move: from=" << from_sq(m) << " to=" << to_sq(m)
+              << " type=" << type_of(m) << " move_value=" << m << std::endl;
+  }
+  return ok;
 }
 
 inline int dist(Direction d) {

@@ -65,6 +65,7 @@ namespace {
     }
 
     // Urbino: Special move generation based on game phase
+    // sync_cout << "DEBUG make_move_and_gating entry: urbino=" << pos.urbino_gating() << " game_ply=" << pos.game_ply() << " num buildings: " << popcount(pos.pieces(CUSTOM_PIECE_2) | pos.pieces(CUSTOM_PIECE_3) | pos.pieces(CUSTOM_PIECE_4)) << sync_endl;
     if (pos.urbino_gating() && pos.game_ply() >= 2)
     {
         // Move generation depends on game phase:
@@ -72,25 +73,45 @@ namespace {
         // Ply 3 after pass: Build only (no Architect moves)
         // Ply 3+ otherwise: Normal 2-part moves (optional Architect move + building)
 
-        // Check if any buildings are on the board
+        // Check if any buildings are on the board (buildings can be of either color)
         bool has_buildings = pos.pieces(CUSTOM_PIECE_2) || pos.pieces(CUSTOM_PIECE_3) || pos.pieces(CUSTOM_PIECE_4);
+
+        // Debug: check what piece is at d6
+        // Square d6 = make_square(FILE_D, RANK_6);
+        // Piece pc_at_d6 = pos.piece_on(d6);
+
+        // sync_cout << "DEBUG: CUSTOM_PIECE_2 count: " << popcount(pos.pieces(CUSTOM_PIECE_2))
+        //           << " CUSTOM_PIECE_3 count: " << popcount(pos.pieces(CUSTOM_PIECE_3))
+        //           << " CUSTOM_PIECE_4 count: " << popcount(pos.pieces(CUSTOM_PIECE_4))
+        //           << " has_buildings: " << has_buildings
+        //           << " all_pieces_count: " << popcount(pos.pieces())
+        //           << " piece_at_d6: " << int(pc_at_d6)
+        //           << " type_at_d6: " << int(type_of(pc_at_d6)) << sync_endl;
 
         // If this is ply 3 and no buildings on board (player 1 passed), only building placement allowed
         if (pos.game_ply() == 3 && !has_buildings && from != to)
         {
+            // sync_cout << "DEBUG make_move_and_gating: Ply 3 after pass, no buildings - no Architect moves allowed" << sync_endl;
             return moveList;  // No Architect moves allowed
         }
 
-        // From ply 4 onward, or ply 3 if buildings exist (player 1 didn't pass), allow Architect moves
-        if (pos.game_ply() >= 4 || (pos.game_ply() >= 3 && has_buildings))
-        {
-            // Normal Urbino moves allowed (Architect can move)
-        }
-        else if (from != to)
-        {
-            // Before ply 3 (or ply 3 after pass), no Architect moves
-            return moveList;
-        }
+        // // After both architects are placed and at least one building exists, allow full moves
+        // // This handles both the normal flow and the swap case
+        // if (has_buildings)
+        // {
+        //     // Buildings exist, so we're past the initial placement phase - allow architect moves
+        // }
+        // else if (pos.game_ply() < 2)
+        // {
+        //     // Still placing architects, no architect moves allowed
+        //     if (from != to)
+        //         return moveList;
+        // }
+        // else if (from != to)
+        // {
+        //     // Ply 2+ but no buildings yet (swap happened), no architect moves
+        //     return moveList;
+        // }
 
         // Generate moves with building placement
         PieceType building_types[] = {CUSTOM_PIECE_2, CUSTOM_PIECE_3, CUSTOM_PIECE_4}; // House, Palace, Tower
@@ -116,12 +137,13 @@ namespace {
         // Calculate line of sight squares (intersection of architects' vision lines)
         // Architects see like queens in chess but cannot see through buildings
         // Use the existing queen attack generation which respects blockers
-        Bitboard arch1_vision = attacks_bb<QUEEN>(arch1, occupied_after_move);
-        Bitboard arch2_vision = attacks_bb<QUEEN>(arch2, occupied_after_move);
+        // Must mask with board_bb() to stay within board boundaries
+        Bitboard arch1_vision = attacks_bb<QUEEN>(arch1, occupied_after_move) & pos.board_bb();
+        Bitboard arch2_vision = attacks_bb<QUEEN>(arch2, occupied_after_move) & pos.board_bb();
 
         // Debug output (commented out for now)
         /*
-        if (pos.game_ply() == 2) { // Only debug after both architects are placed
+        if (pos.game_ply() > 2) { // Only debug after both architects are placed
             sync_cout << "DEBUG: Architect 1 at square " << arch1 << " sees " << popcount(arch1_vision) << " squares" << sync_endl;
             sync_cout << "DEBUG: Architect 2 at square " << arch2 << " sees " << popcount(arch2_vision) << " squares" << sync_endl;
             sync_cout << "DEBUG: Intersection has " << popcount(arch1_vision & arch2_vision) << " squares" << sync_endl;
@@ -139,7 +161,6 @@ namespace {
             }
         }
         */
-
         // Buildings can only be placed at the intersection of both architects' lines of sight
         // Exclude occupied squares - buildings cannot be placed on existing pieces
         Bitboard valid_placement_squares = arch1_vision & arch2_vision & ~occupied_after_move;
@@ -158,17 +179,72 @@ namespace {
                 else if (bpt == CUSTOM_PIECE_4) { // Tower
                     placement_squares &= ~pos.urbino_excluded_towers();
                 }
-
+                // Debug output
+                if (false && from == make_square(FILE_A, RANK_5) && to == make_square(FILE_D, RANK_1) && bpt == CUSTOM_PIECE_3) {
+                    Bitboard before_adjacency = placement_squares;
+                    sync_cout << "DEBUG make_move_and_gating: a5->d1 palace placement"
+                              << " count=" << count
+                              << " before_adjacency=" << popcount(before_adjacency)
+                              << " after_adjacency=" << popcount(placement_squares) << sync_endl;
+                    // Check what squares were excluded
+                    Bitboard excluded = pos.urbino_excluded_palaces();
+                    Bitboard palaces = pos.pieces(CUSTOM_PIECE_3);
+                    sync_cout << "  excluded_palaces_count=" << popcount(excluded)
+                              << " palace_pieces=" << popcount(palaces) << sync_endl;
+                    // Show which specific squares are excluded
+                    Bitboard exc_copy = excluded;
+                    sync_cout << "  Excluded squares: ";
+                    while (exc_copy) {
+                        Square sq = pop_lsb(exc_copy);
+                        char file = 'a' + file_of(sq);
+                        char rank = '1' + rank_of(sq);
+                        sync_cout << file << rank << " ";
+                    }
+                    sync_cout << sync_endl;
+                    // Show where palaces actually are
+                    sync_cout << "  Palace locations: ";
+                    while (palaces) {
+                        Square sq = pop_lsb(palaces);
+                        char file = 'a' + file_of(sq);
+                        char rank = '1' + rank_of(sq);
+                        sync_cout << file << rank << " ";
+                    }
+                    sync_cout << sync_endl;
+                    // Show what's in the line of sight before adjacency rules
+                    Bitboard los = valid_placement_squares;
+                    while (los) {
+                        Square sq = pop_lsb(los);
+                        char file = 'a' + file_of(sq);
+                        char rank = '1' + rank_of(sq);
+                        bool excluded_by_adj = (pos.urbino_excluded_palaces() & square_bb(sq));
+                        sync_cout << "  LOS square: " << file << rank << " excluded=" << excluded_by_adj << sync_endl;
+                    }
+                }
                 // Apply the one-neighborhood-per-color rule
-
-
                 while (placement_squares)
                 {
                     Square building_sq = pop_lsb(placement_squares);
                     bool isLegal = pos.urbino_legal_build(us, building_sq);
+                    /*
+                    bool slowLegal = pos.urbino_legal_build_slow(us, building_sq);
+                    if (isLegal != slowLegal) {
+                        char file = 'a' + file_of(building_sq);
+                        char rank = '1' + rank_of(building_sq);
+                        sync_cout << "URBINO MISMATCH at square " << file << rank
+                                  << " (sq=" << building_sq << "): fast=" << isLegal
+                                  << " slow=" << slowLegal << sync_endl;
+                    }
+                    assert(isLegal == slowLegal); // Sanity check
+                    */
                     assert(isLegal == pos.urbino_legal_build_slow(us, building_sq)); // Sanity check
-                    if (isLegal)
-                        *moveList++ = make_gating<T>(from, to, bpt, building_sq);
+                    if (isLegal) {
+                        Move m = make_gating<T>(from, to, bpt, building_sq);
+                        // sync_cout << "DEBUG: Generated gating move - from=" << from << " to=" << to
+                        //           << " piece_type=" << int(bpt) << " gate_sq=" << building_sq
+                        //           << " gating_type(m)=" << int(gating_type(m))
+                        //           << " gating_square(m)=" << gating_square(m) << sync_endl;
+                        *moveList++ = m;
+                    }
                 }
             }
         }
@@ -400,7 +476,7 @@ namespace {
 
   template<Color Us, GenType Type>
   ExtMove* generate_moves(const Position& pos, ExtMove* moveList, PieceType Pt, Bitboard target) {
-
+    // sync_cout << "DEBUG generate_moves entry: piece count" << popcount(pos.pieces()) << sync_endl;
     assert(Pt != KING && Pt != PAWN);
 
     // For Urbino architects (shared pieces), get pieces of both colors
@@ -500,7 +576,7 @@ namespace {
 
   template<Color Us, GenType Type>
   ExtMove* generate_all(const Position& pos, ExtMove* moveList) {
-
+    // sync_cout << "DEBUG generate_all entry: ply " << pos.game_ply() << " total_pieces=" << popcount(pos.pieces()) << sync_endl;
     static_assert(Type != LEGAL, "Unsupported type in generate_all()");
 
     constexpr bool Checks = Type == QUIET_CHECKS; // Reduce template instantiations
@@ -529,8 +605,11 @@ namespace {
         target &= pos.board_bb();
 
         moveList = generate_pawn_moves<Us, Type>(pos, moveList, target);
+        // ExtMove* start = moveList;
+        // sync_cout << "DEBUG generate_all: Before generate_moves, ply " << pos.game_ply() << " total_pieces=" << popcount(pos.pieces()) << sync_endl;
         for (PieceSet ps = pos.piece_types() & ~(piece_set(PAWN) | KING); ps;)
             moveList = generate_moves<Us, Type>(pos, moveList, pop_lsb(ps), target);
+        // sync_cout << "DEBUG generate_all: After generate_moves, ply " << pos.game_ply() << " total_pieces=" << popcount(pos.pieces()) << " number of moves=" << (moveList - start) << sync_endl;
         // generate drops
         if (pos.piece_drops() && Type != CAPTURES && (pos.can_drop(Us, ALL_PIECES) || pos.two_boards()))
         {
@@ -550,7 +629,7 @@ namespace {
 
                     // Generate building placement move (no Architect movement)
                     Square dummy_sq = SQ_A1;
-                    moveList = make_move_and_gating<NORMAL>(pos, moveList, Us, dummy_sq, dummy_sq);
+                    moveList = make_move_and_gating<SPECIAL>(pos, moveList, Us, dummy_sq, dummy_sq);
 
                     // Generate pass move (using SPECIAL move type with from == to)
                     // Use the architect square for the pass move
@@ -562,7 +641,7 @@ namespace {
                 {
                     // After a pass on ply 2, opponent can only place buildings (no Architect moves)
                     Square dummy_sq = SQ_A1;
-                    moveList = make_move_and_gating<NORMAL>(pos, moveList, Us, dummy_sq, dummy_sq);
+                    moveList = make_move_and_gating<SPECIAL>(pos, moveList, Us, dummy_sq, dummy_sq);
                 }
                 // After the special phase, buildings are placed via gating after Architect moves
                 else
@@ -570,7 +649,7 @@ namespace {
                     // Generate a single "building placement only" move (no Architect movement)
                     // Use any arbitrary square for from/to since they'll be equal (no actual move)
                     Square dummy_sq = SQ_A1;
-                    moveList = make_move_and_gating<NORMAL>(pos, moveList, Us, dummy_sq, dummy_sq);
+                    moveList = make_move_and_gating<SPECIAL>(pos, moveList, Us, dummy_sq, dummy_sq);
                 }
             }
             else
@@ -656,7 +735,7 @@ namespace {
 
 template<GenType Type>
 ExtMove* generate(const Position& pos, ExtMove* moveList) {
-
+//   sync_cout << "DEBUG generate<" << Type << "> entry: ply " << pos.game_ply() << sync_endl;
   static_assert(Type != LEGAL, "Unsupported type in generate()");
   assert((Type == EVASIONS) == (bool)pos.checkers());
 
@@ -679,18 +758,22 @@ template ExtMove* generate<NON_EVASIONS>(const Position&, ExtMove*);
 template<>
 ExtMove* generate<LEGAL>(const Position& pos, ExtMove* moveList) {
 
-  if (pos.is_immediate_game_end())
+  if (pos.is_immediate_game_end()) {
+    //   sync_cout << "DEBUG generate<LEGAL> immediate_game_end=true, returning early" << sync_endl;
       return moveList;
+  }
 
   ExtMove* cur = moveList;
 
   moveList = pos.checkers() ? generate<EVASIONS    >(pos, moveList)
                             : generate<NON_EVASIONS>(pos, moveList);
-  while (cur != moveList)
+
+  while (cur != moveList) {
       if (!pos.legal(*cur) || pos.virtual_drop(*cur))
           *cur = (--moveList)->move;
       else
           ++cur;
+  }
 
   return moveList;
 }

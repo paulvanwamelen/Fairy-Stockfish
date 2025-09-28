@@ -75,6 +75,10 @@ namespace {
     {
         states->emplace_back();
         pos.do_move(m, states->back());
+        sync_cout << "DEBUG UCI after do_move(" << token << "): total_pieces=" << popcount(pos.pieces())
+                  << " houses=" << popcount(pos.pieces(CUSTOM_PIECE_2))
+                  << " palaces=" << popcount(pos.pieces(CUSTOM_PIECE_3))
+                  << " towers=" << popcount(pos.pieces(CUSTOM_PIECE_4)) << sync_endl;
     }
   }
 
@@ -561,7 +565,7 @@ string UCI::move(const Position& pos, Move m) {
       move += '+';
   else if (type_of(m) == PIECE_DEMOTION)
       move += '-';
-  else if (is_gating(m))
+  else if (is_gating(m) || (pos.urbino_gating() && type_of(m) == SPECIAL && gating_type(m)))
   {
       move += pos.piece_to_char()[make_piece(BLACK, gating_type(m))];
       if (gating_square(m) != from)

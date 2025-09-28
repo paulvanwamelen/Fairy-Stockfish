@@ -263,8 +263,11 @@ Position& Position::set(const Variant* v, const string& fenStr, bool isChess960,
   size_t idx;
   std::istringstream ss(fenStr);
 
-  std::memset(this, 0, sizeof(Position));
-  std::memset(si, 0, sizeof(StateInfo));
+  // std::memset(this, 0, sizeof(Position));
+  // std::memset(si, 0, sizeof(StateInfo));
+  this->~Position();
+  ::new (static_cast<void*>(this)) Position();
+  *si   = StateInfo{};
   st = si;
 
   var = v;
@@ -533,6 +536,9 @@ Position& Position::set(const Variant* v, const string& fenStr, bool isChess960,
       }
   }
 
+  if (urbino_gating())
+      urbino_rebuild_all();
+
   chess960 = isChess960 || v->chess960;
   tsumeMode = Options["TsumeMode"];
   thisThread = th;
@@ -619,29 +625,6 @@ void Position::set_state(StateInfo* si) const {
   si->nonPawnMaterial[WHITE] = si->nonPawnMaterial[BLACK] = VALUE_ZERO;
   si->checkersBB = count<KING>(sideToMove) ? attackers_to(square<KING>(sideToMove), ~sideToMove) : Bitboard(0);
   si->move = MOVE_NONE;
-
-  // Initialize Urbino excluded squares based on existing palaces and towers
-  si->urbinoExcludedPalaces = 0;
-  si->urbinoExcludedTowers = 0;
-  // si->urbinoUndo
-  if (urbino_gating())
-  {
-      // Find all palaces and mark orthogonally adjacent squares as excluded
-      for (Bitboard b = pieces(CUSTOM_PIECE_3); b; )
-      {
-          Bitboard s = square_bb(pop_lsb(b));
-          Bitboard orthogonal_adjacent = shift<NORTH>(s) | shift<SOUTH>(s) | shift<EAST>(s) | shift<WEST>(s);
-          si->urbinoExcludedPalaces |= orthogonal_adjacent & board_bb();
-      }
-      // Find all towers and mark orthogonally adjacent squares as excluded
-      for (Bitboard b = pieces(CUSTOM_PIECE_4); b; )
-      {
-          Bitboard s = square_bb(pop_lsb(b));
-          Bitboard orthogonal_adjacent = shift<NORTH>(s) | shift<SOUTH>(s)
-                                       | shift<EAST>(s) | shift<WEST>(s);
-          si->urbinoExcludedTowers |= orthogonal_adjacent & board_bb();
-      }
-  }
 
   set_check_info(si);
 
@@ -1071,7 +1054,13 @@ bool Position::legal(Move m) const {
   Square from = from_sq(m);
   Square to = to_sq(m);
 
-  assert(color_of(moved_piece(m)) == us);
+  // In Urbino, architects (CUSTOM_PIECE_1) can be moved by either player once on board
+  // For drops, architects come from the player's pocket so they have the right color
+  // For moves, architects on board can be moved by either player
+  // Special moves with from==to for building-only placement don't have a piece
+  assert((type_of(m) == SPECIAL && from == to)
+         || (urbino_gating() && type_of(moved_piece(m)) == CUSTOM_PIECE_1 && type_of(m) != DROP)
+         || (color_of(moved_piece(m)) == us));
   assert(!count<KING>(us) || piece_on(square<KING>(us)) == make_piece(us, KING));
   assert(board_bb() & to);
 
@@ -1445,7 +1434,8 @@ bool Position::pseudo_legal(const Move m) const {
 bool Position::gives_check(Move m) const {
 
   assert(is_ok(m));
-  assert(color_of(moved_piece(m)) == sideToMove);
+  // In Urbino, architects are neutral pieces, so skip color check for architect moves
+  assert((urbino_gating() && (type_of(m) == SPECIAL || is_gating(m))) || color_of(moved_piece(m)) == sideToMove);
 
   Square from = from_sq(m);
   Square to = to_sq(m);
@@ -1575,6 +1565,7 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
   newSt.previous = st;
   st = &newSt;
   st->move = m;
+  st->urbinoUndo = {};
 
   // Increment ply counters. In particular, rule50 will be reset to zero later on
   // in case of a capture or a pawn move.
@@ -1598,14 +1589,20 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
   Piece captured = piece_on(type_of(m) == EN_PASSANT ? capture_square(to) : to);
   if (to == from)
   {
-      assert((type_of(m) == PROMOTION && sittuyin_promotion()) || (is_pass(m) && (pass(us) || var->wallOrMove )));
+      assert((type_of(m) == PROMOTION && sittuyin_promotion()) || (is_pass(m) && (pass(us) || var->wallOrMove ))
+             || (urbino_gating() && type_of(m) == SPECIAL));
       captured = NO_PIECE;
   }
   st->capturedpromoted = is_promoted(to);
   st->unpromotedCapturedPiece = captured ? unpromoted_piece_on(to) : NO_PIECE;
-  st->pass = is_pass(m);
+  // In Urbino, early special moves (architect placement at ply 0-1, swap at ply 2, first building at ply 3) are not passes
+  // Only special moves with from == to after ply 3 are considered passes
+  st->pass = is_pass(m) && (!urbino_gating() || game_ply() > 3);
 
-  assert(color_of(pc) == us);
+  // In Urbino, skip color assertion for architect moves and building placements without architect movement
+  if (!(urbino_gating() && (type_of(m) == SPECIAL || is_gating(m)))) {
+      assert(color_of(pc) == us);
+  }
   assert(captured == NO_PIECE || color_of(captured) == (type_of(m) != CASTLING ? them : us));
   assert(type_of(captured) != KING);
 
@@ -1826,8 +1823,9 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
           dp.from[0] = from;
           dp.to[0] = to;
       }
-
-      move_piece(from, to);
+      // For Urbino building-only moves, there's no piece to move
+      if (!(urbino_gating() && type_of(m) == SPECIAL && from == to))
+          move_piece(from, to);
   }
 
   // If the moving piece is a pawn do some special extra work
@@ -1960,7 +1958,8 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
   st->capturedPiece = captured;
 
   // Add gating piece
-  if (is_gating(m))
+  // In Urbino, SPECIAL moves with gating are building-only placements
+  if (is_gating(m) || (urbino_gating() && type_of(m) == SPECIAL && gating_type(m)))
   {
       Square gate = gating_square(m);
       Piece gating_piece = make_piece(us, gating_type(m));
@@ -1976,8 +1975,13 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
           dp.dirty_num++;
       }
 
+    //   sync_cout << "DEBUG do_move: About to place piece " << int(gating_piece)
+    //             << " at square " << gate << sync_endl;
       put_piece(gating_piece, gate);
       remove_from_hand(gating_piece);
+    //   sync_cout << "DEBUG do_move: After put_piece, board[" << gate << "]=" << int(board[gate])
+    //             << " byTypeBB[" << int(type_of(gating_piece)) << "] has " << popcount(byTypeBB[type_of(gating_piece)]) << " bits"
+    //             << " total pieces=" << popcount(pieces()) << sync_endl;
 
       st->gatesBB[us] ^= gate;
       k ^= Zobrist::psq[gating_piece][gate];
@@ -1990,22 +1994,24 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
           PieceType gatingType = gating_type(m);
           if (gatingType == CUSTOM_PIECE_3) { // Palace
               // Palaces can't be orthogonally adjacent to other palaces
-              Bitboard orthogonal_adjacent = shift<NORTH>(square_bb(gate)) | shift<SOUTH>(square_bb(gate))
-                                           | shift<EAST>(square_bb(gate)) | shift<WEST>(square_bb(gate));
-              orthogonal_adjacent &= board_bb();
-              st->urbinoExcludedPalaces |= orthogonal_adjacent;
+              st->urbinoExcludedPalaces |= neighbors4_bb(square_bb(gate));  // FIX: Convert Square to Bitboard
           }
           else if (gatingType == CUSTOM_PIECE_4) { // Tower
               // Towers can't be orthogonally adjacent to other towers
-              Bitboard orthogonal_adjacent = shift<NORTH>(square_bb(gate)) | shift<SOUTH>(square_bb(gate))
-                                           | shift<EAST>(square_bb(gate)) | shift<WEST>(square_bb(gate));
-              orthogonal_adjacent &= board_bb();
-              st->urbinoExcludedTowers |= orthogonal_adjacent;
+              st->urbinoExcludedTowers |= neighbors4_bb(square_bb(gate));  // FIX: Convert Square to Bitboard
           }
 
           // Update blocks and adjacencies after placing a building
           if (gatingType == CUSTOM_PIECE_2 || gatingType == CUSTOM_PIECE_3 || gatingType == CUSTOM_PIECE_4) {
+            //   sync_cout << "DEBUG do_move before urbino_update_blocks: W=" << urbinoScoreW
+            //             << " B=" << urbinoScoreB << " ply=" << game_ply() << sync_endl;
               urbino_update_blocks(gate, us, gatingType, st->urbinoUndo);
+          }
+          else if (urbino_gating()) {
+              std::cerr << "WARNING: Urbino building placed but blocks not updated! gatingType=" << gatingType
+                        << " CUSTOM_PIECE_2=" << CUSTOM_PIECE_2
+                        << " CUSTOM_PIECE_3=" << CUSTOM_PIECE_3
+                        << " CUSTOM_PIECE_4=" << CUSTOM_PIECE_4 << std::endl;
           }
       }
   }
@@ -2174,6 +2180,12 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
   }
 
   assert(pos_is_ok());
+
+#ifndef NDEBUG
+  // Verify Urbino consistency after move
+  if (urbino_gating())
+      verify_urbino_consistency();
+#endif
 }
 
 
@@ -2181,7 +2193,6 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
 /// be restored to exactly the same state as before the move was made.
 
 void Position::undo_move(Move m) {
-
   assert(is_ok(m));
 
   sideToMove = ~sideToMove;
@@ -2202,6 +2213,7 @@ void Position::undo_move(Move m) {
   // Add the blast pieces
   if (st->capturedPiece && (blast_on_capture() || var->petrifyOnCaptureTypes))
   {
+      sync_cout << "DEBUG undo_move: Really!? Why are we here? Adding back blast pieces" << sync_endl;
       Bitboard blast = attacks_bb<KING>(to) | to;
       while (blast)
       {
@@ -2225,7 +2237,8 @@ void Position::undo_move(Move m) {
   }
 
   // Remove gated piece
-  if (is_gating(m))
+  // In Urbino, SPECIAL moves with gating are building-only placements
+  if (is_gating(m) || (urbino_gating() && type_of(m) == SPECIAL && gating_type(m)))
   {
       Piece gating_piece = make_piece(us, gating_type(m));
       remove_piece(gating_square(m));
@@ -2269,7 +2282,7 @@ void Position::undo_move(Move m) {
   {
       if (type_of(m) == DROP)
           undrop_piece(make_piece(us, in_hand_piece_type(m)), to); // Remove the dropped piece
-      else
+      else if (!(urbino_gating() && type_of(m) == SPECIAL && from == to))
           move_piece(to, from); // Put the piece back at the source square
 
       if (st->capturedPiece)
@@ -2315,6 +2328,12 @@ void Position::undo_move(Move m) {
   --gamePly;
 
   assert(pos_is_ok());
+
+#ifndef NDEBUG
+  // Verify Urbino consistency after undo
+  if (urbino_gating())
+      verify_urbino_consistency();
+#endif
 }
 
 
@@ -2360,8 +2379,8 @@ void Position::do_null_move(StateInfo& newSt) {
   assert(!checkers());
   assert(&newSt != st);
 
-  std::memcpy(&newSt, st, offsetof(StateInfo, accumulator));
-
+  // std::memcpy(&newSt, st, offsetof(StateInfo, accumulator));
+  std::memcpy(static_cast<void*>(&newSt), static_cast<void*>(st), offsetof(StateInfo, accumulator));
   newSt.previous = st;
   st = &newSt;
 
@@ -2397,6 +2416,12 @@ void Position::undo_null_move() {
 
   st = st->previous;
   sideToMove = ~sideToMove;
+
+#ifndef NDEBUG
+  // Verify Urbino consistency after undo
+  if (urbino_gating())
+      verify_urbino_consistency();
+#endif
 }
 
 
@@ -2803,6 +2828,13 @@ bool Position::is_optional_game_end(Value& result, int ply, int countStarted) co
 
 bool Position::is_immediate_game_end(Value& result, int ply) const {
 
+//   if (urbino_gating()) {
+//       sync_cout << "DEBUG is_immediate_game_end urbino:"
+//                 << " extinction_value=" << extinction_value()
+//                 << " flag_move=" << flag_move()
+//                 << " pieces=" << popcount(pieces()) << sync_endl;
+//   }
+
   // Extinction
   // Extinction does not apply for pseudo-royal pieces, because they can not be captured
   if (extinction_value() != VALUE_NONE && (!var->extinctionPseudoRoyal || blast_on_capture()))
@@ -2815,6 +2847,8 @@ bool Position::is_immediate_game_end(Value& result, int ply) const {
                   && count_with_hand(~c, pt) >= var->extinctionOpponentPieceCount + (extinction_claim() && c == sideToMove))
               {
                   result = c == sideToMove ? extinction_value(ply) : -extinction_value(ply);
+                //   if (urbino_gating())
+                //       sync_cout << "DEBUG: EXTINCTION triggered game end" << sync_endl;
                   return true;
               }
           }
@@ -2979,12 +3013,12 @@ bool Position::is_immediate_game_end(Value& result, int ply) const {
           }
       }
   }
-
   // Check for bikjang rule (Janggi), double passing, or board running full
   if (   (st->pliesFromNull > 0 && ((st->bikjang && st->previous->bikjang) || ((st->pass && st->previous->pass)&&!var->wallOrMove)))
       || (var->adjudicateFullBoard && !(~pieces() & board_bb())))
   {
       result = var->materialCounting ? convert_mate_value(material_counting_result(), ply) : VALUE_DRAW;
+      // sync_cout << "DEBUG: pass: " << st->pass << " previous: " << st->previous->pass << sync_endl;
       return true;
   }
 
@@ -2992,6 +3026,7 @@ bool Position::is_immediate_game_end(Value& result, int ply) const {
   if (tsumeMode && !count<KING>(~sideToMove) && count<KING>(sideToMove) && !checkers())
   {
       result = mate_in(ply);
+      // sync_cout << "DEBUG: tsume!????? " << sync_endl;
       return true;
   }
 
@@ -3005,13 +3040,13 @@ bool Position::is_immediate_game_end(Value& result, int ply) const {
       if (virtualCount > 0)
       {
           result = mate_in(ply);
+          // sync_cout << "DEBUG: Mate in " << ply << sync_endl;
           return true;
       }
   }
-
+  // sync_cout << "DEBUG: No immediate game end detected" << sync_endl;
   return false;
 }
-
 // Position::chased() tests whether the last move was a chase.
 
 Bitboard Position::chased() const {
@@ -3400,12 +3435,141 @@ void Position::urbino_scores(int& scoreW, int& scoreB, bool debug) const {
     if (debug) {
         sync_cout << "Total Urbino scores: WHITE(" << scoreW << ") BLACK(" << scoreB << ")" << sync_endl;
     }
+
+    // Assert that the slow recomputed scores match the incrementally maintained scores
+    if (scoreW != urbinoScoreW || scoreB != urbinoScoreB) {
+        sync_cout << "ERROR: Urbino scores mismatch!" << sync_endl;
+        sync_cout << "Recomputed scores: WHITE(" << scoreW << ") BLACK(" << scoreB << ")" << sync_endl;
+        sync_cout << "Stored scores:     WHITE(" << urbinoScoreW << ") BLACK(" << urbinoScoreB << ")" << sync_endl;
+        /*
+        // Print bitboards for debugging
+        print_bitboard(houses, "Houses");
+        print_bitboard(palaces, "Palaces");
+        print_bitboard(towers,  "Towers");
+        print_bitboard(all,     "All buildings");
+        print_bitboard(pieces(WHITE), "White pieces");
+        print_bitboard(pieces(BLACK), "Black pieces");
+        */
+    }
+    assert(scoreW == urbinoScoreW);
+    assert(scoreB == urbinoScoreB);
+}
+
+// Helper function to print a bitboard for debugging
+void print_bitboard(Bitboard bb, const std::string& name = "unknown") {
+    if (!name.empty()) {
+        sync_cout << name << ":" << std::endl;
+    }
+    for (Rank r = RANK_9; r >= RANK_1; --r) {
+        std::cout << " ";
+        for (File f = FILE_A; f <= FILE_I; ++f) {
+            Square s = make_square(f, r);
+            if (bb & s)
+                std::cout << "X ";
+            else
+                std::cout << ". ";
+        }
+        std::cout << std::endl;
+    }
+    std::cout << sync_endl;
+}
+
+// Verify Urbino data structure consistency
+void Position::verify_urbino_consistency() const {
+    if (!urbino_gating()) return;
+
+    // 1. Check that every building square has a valid district ID
+    Bitboard buildings = (pieces(CUSTOM_PIECE_2) | pieces(CUSTOM_PIECE_3) | pieces(CUSTOM_PIECE_4)) & board_bb();
+    while (buildings) {
+        Square s = pop_lsb(buildings);
+        int distId = urbinoDistId[s];
+        assert(distId >= 0 && distId < (int)urbinoDistricts.size());
+        assert(urbinoDistricts[distId].alive);
+        assert(urbinoDistricts[distId].mask & s);
+    }
+
+    // 2. Check that district masks match what urbinoDistId says
+    for (int id = 0; id < (int)urbinoDistricts.size(); ++id) {
+        if (!urbinoDistricts[id].alive) continue;
+
+        const UrbinoDistrict& dist = urbinoDistricts[id];
+        Bitboard mask = dist.mask;
+        while (mask) {
+            Square s = pop_lsb(mask);
+            assert(urbinoDistId[s] == id);
+        }
+
+        // 3. Check that colorMask is subset of mask
+        assert((dist.colorMask[WHITE] & ~dist.mask) == 0);
+        assert((dist.colorMask[BLACK] & ~dist.mask) == 0);
+
+        // 4. Check that hasBlock matches colorMask
+        assert(dist.hasBlock[WHITE] == bool(dist.colorMask[WHITE]));
+        assert(dist.hasBlock[BLACK] == bool(dist.colorMask[BLACK]));
+
+        // 7. Verify owner and pts are correctly computed from tally
+        UrbinoDistTally testTally = dist.t;
+        // Recompute owner and pts inline
+        const int vW = testTally.wH + 2*testTally.wP + 3*testTally.wT;
+        const int vB = testTally.bH + 2*testTally.bP + 3*testTally.bT;
+        if (vW==0 || vB==0) {
+            testTally.owner=-1; testTally.pts=0;
+        } else if (vW > vB) {
+            testTally.owner=0; testTally.pts=vW;
+        } else if (vB > vW) {
+            testTally.owner=1; testTally.pts=vB;
+        } else if (testTally.wT != testTally.bT) {
+            if (testTally.wT > testTally.bT) { testTally.owner=0; testTally.pts=vW; }
+            else { testTally.owner=1; testTally.pts=vB; }
+        } else if (testTally.wP != testTally.bP) {
+            if (testTally.wP > testTally.bP) { testTally.owner=0; testTally.pts=vW; }
+            else { testTally.owner=1; testTally.pts=vB; }
+        } else {
+            testTally.owner = -1; testTally.pts = 0;
+        }
+
+        if (dist.t.owner != testTally.owner || dist.t.pts != testTally.pts) {
+            sync_cout << "ERROR: District " << id << " has incorrect owner/pts!" << sync_endl;
+            sync_cout << "  Stored: owner=" << dist.t.owner << " pts=" << dist.t.pts << sync_endl;
+            sync_cout << "  Should be: owner=" << testTally.owner << " pts=" << testTally.pts << sync_endl;
+            sync_cout << "  Tally: wH=" << dist.t.wH << " wP=" << dist.t.wP << " wT=" << dist.t.wT
+                      << " bH=" << dist.t.bH << " bP=" << dist.t.bP << " bT=" << dist.t.bT << sync_endl;
+            assert(false);
+        }
+    }
+
+    // 5. Verify scores match recomputation
+    int computedW = 0, computedB = 0;
+    urbino_scores(computedW, computedB, false);
+    // These assertions are already in urbino_scores
+
+    // 6. Verify exclusion masks match actual palace/tower positions
+    // Recompute what the exclusion masks should be
+    Bitboard palaces = pieces(CUSTOM_PIECE_3) & board_bb();
+    Bitboard towers = pieces(CUSTOM_PIECE_4) & board_bb();
+
+    Bitboard expected_palace_exclusions = neighbors4_bb(palaces);
+    Bitboard expected_tower_exclusions = neighbors4_bb(towers);
+
+    // Compare with stored values
+    if (st->urbinoExcludedPalaces != expected_palace_exclusions) {
+        sync_cout << "ERROR: urbinoExcludedPalaces mismatch!" << sync_endl;
+        print_bitboard(st->urbinoExcludedPalaces, "Stored urbinoExcludedPalaces");
+        print_bitboard(expected_palace_exclusions, "Expected urbinoExcludedPalaces");
+        assert(false);
+    }
+
+    if (st->urbinoExcludedTowers != expected_tower_exclusions) {
+        sync_cout << "ERROR: urbinoExcludedTowers mismatch!" << sync_endl;
+        print_bitboard(st->urbinoExcludedTowers, "Stored urbinoExcludedTowers");
+        print_bitboard(expected_tower_exclusions, "Expected urbinoExcludedTowers");
+        assert(false);
+    }
 }
 
 bool Position::urbino_legal_build_slow(Color us, Square s) const {
     // 0) Only relevant in Urbino
     if (!urbino_gating()) return true;
-
     const Color them = ~us;
     const Bitboard allBld = (pieces(CUSTOM_PIECE_2) | pieces(CUSTOM_PIECE_3) | pieces(CUSTOM_PIECE_4)) & board_bb();
     const Bitboard nbr = (shift<NORTH>(square_bb(s)) | shift<SOUTH>(square_bb(s)) |
@@ -3477,6 +3641,7 @@ bool Position::urbino_legal_build_slow(Color us, Square s) const {
 }
 
 bool Position::urbino_legal_build(Color us, Square s) const {
+    // sync_cout << "urbino_legal_build: s = " << (char('a' + file_of(s))) << (char('1' + rank_of(s))) << sync_endl;
     int adj[4], k=0; // dedup district ids around s
     for_each_orth_neighbor(s, [&](int t){
         int id = urbinoDistId[t];
@@ -3484,24 +3649,45 @@ bool Position::urbino_legal_build(Color us, Square s) const {
             adj[k++] = id;
         }
     });
+    // std::cout << "urbino_legal_build: k = " << k << " adj:";
+    // for (int i=0;i<k;i++) std::cout << " " << adj[i];
+    // std::cout << std::endl;
     if (k==0) return true; // new 1-color district with our piece only. Always OK
 
     // Opponent: must not appear in ≥2 adj districts
     Color them = ~us;
-    int opp = 0; for (int i=0;i<k;i++) opp += urbinoDistricts[adj[i]].hasBlock[them];
-    if (opp > 1) return false;
+    int opp = 0; 
+    // for (int i=0;i<k;i++) {
+    //     if (urbinoDistricts[adj[i]].hasBlock[them]) {
+    //         // print_bitboard(urbinoDistricts[adj[i]].colorMask[them], "them district");
+    //     }
+    //     opp += urbinoDistricts[adj[i]].hasBlock[them];
+    // }
+    // if (opp > 1) {
+    //     // sync_cout << "urbino_legal_build: opp > 1" << sync_endl;
+    //     return false;
+    // }
+    for (int i=0;i<k;i++) {
+        if (urbinoDistricts[adj[i]].hasBlock[them]) {
+            if (opp == 1) {
+                // print_bitboard(urbinoDistricts[adj[i]].colorMask[them], "them district");
+                // sync_cout << "urbino_legal_build: opp > 1" << sync_endl;
+                return false;
+            }
+            opp = 1;
+            // print_bitboard(urbinoDistricts[adj[i]].colorMask[them], "them district");
+        }
+    }
 
     // Ours: if we appear, s must be adjacent to every our-block among adj districts
-    int mine = 0; Bitboard touch = 0;
     Bitboard myNbr = (shift<NORTH>(square_bb(s))|shift<SOUTH>(square_bb(s))|
-                      shift<EAST >(square_bb(s))|shift<WEST >(square_bb(s))) & pieces(us);
+                      shift<EAST >(square_bb(s))|shift<WEST >(square_bb(s))) & (pieces(us) | pieces(them));
     for (int i=0;i<k;i++){
-        if (urbinoDistricts[adj[i]].hasBlock[us]){
-            ++mine;
-            if (myNbr & urbinoDistricts[adj[i]].colorMask[us]) // touches that district’s block?
-                touch |= 1;
-            else
-                return false; // we'd introduce a second our-block
+        if (urbinoDistricts[adj[i]].hasBlock[us] && !(myNbr & urbinoDistricts[adj[i]].colorMask[us])){
+            // print_bitboard(myNbr, "myNbr");
+            // print_bitboard(urbinoDistricts[adj[i]].colorMask[us], "bad district");
+            // sync_cout << "urbino_legal_build: introducing second our-block" << sync_endl;
+            return false; // we'd introduce a second our-block
         }
     }
     return true; // either mine==0 or we touch every our-block
@@ -3546,8 +3732,76 @@ void Position::urbino_update_blocks(Square building_sq) {
 }
 */
 
+void Position::urbino_rebuild_all() {
+    // 0) Clear everything
+    urbinoDistId.fill(-1);
+    urbinoDistricts.clear();
+    st->urbinoExcludedPalaces = st->urbinoExcludedTowers = 0;
+    urbinoScoreW = urbinoScoreB = 0;
+
+    // 1) Collect building bitboards (mask to board!)
+    /* 
+        Bitboard H = pieces(CUSTOM_PIECE_2) & board_bb();
+        Bitboard P = pieces(CUSTOM_PIECE_3) & board_bb();
+        Bitboard T = pieces(CUSTOM_PIECE_4) & board_bb();
+        Bitboard ALL = (H|P|T) & board_bb();
+        I don't believe you... */
+    Bitboard H = pieces(CUSTOM_PIECE_2);
+    Bitboard P = pieces(CUSTOM_PIECE_3);
+    Bitboard T = pieces(CUSTOM_PIECE_4);
+    Bitboard ALL = (H|P|T);
+    if (!ALL) return;
+
+    // 2) Partition into orth-connected districts (bitboard flood-fill)
+    auto flood = [&](Bitboard seed)->Bitboard {
+        Bitboard grp=0, fr=seed;
+        while (fr){ grp |= fr; fr = neighbors4_bb(fr) & ALL & ~grp; }
+        return grp;
+    };
+
+    Bitboard rest = ALL;
+    while (rest) {
+        Square seed = lsb(rest);
+        Bitboard Dmask = flood(square_bb(seed));
+        rest &= ~Dmask;
+
+        // 3) Build district record
+        UrbinoDistrict D; D.alive = true; D.mask = Dmask;
+
+        // Color masks (only buildings)
+        Bitboard Wb = Dmask & pieces(WHITE);
+        Bitboard Bb = Dmask & pieces(BLACK);
+        D.colorMask[WHITE] = Wb;
+        D.colorMask[BLACK] = Bb;
+        D.hasBlock[WHITE]  = (Wb != 0);
+        D.hasBlock[BLACK]  = (Bb != 0);
+
+        // Tallies by type/color
+        D.t.wH = popcount(Wb & H);  D.t.wP = popcount(Wb & P);  D.t.wT = popcount(Wb & T);
+        D.t.bH = popcount(Bb & H);  D.t.bP = popcount(Bb & P);  D.t.bT = popcount(Bb & T);
+
+        // Map squares → district id
+        int id = (int)urbinoDistricts.size();
+        Bitboard m = Dmask;
+        while (m){ Square q = pop_lsb(m); urbinoDistId[q] = (int8_t)id; }
+
+        // 4) Score contribution - MUST compute BEFORE push_back!
+        urbino_compute_points(D.t);
+
+        urbinoDistricts.push_back(D);
+        if (D.t.owner==0) urbinoScoreW += D.t.pts;
+        else if (D.t.owner==1) urbinoScoreB += D.t.pts;
+    }
+
+    // 5) Exclusion masks (orth-adjacent to any palace/tower, only empty squares matter in gen)
+    st->urbinoExcludedPalaces = neighbors4_bb(P) & ~ALL;
+    st->urbinoExcludedTowers  = neighbors4_bb(T) & ~ALL;
+}
+
+// When we build at s, districts (and their blocks) may merge.
 void Position::urbino_update_blocks(Square s, Color c, PieceType pt, UrbinoUndo& u) {
     u.oldScoreW = urbinoScoreW; u.oldScoreB = urbinoScoreB;
+
 
     // 1) Gather unique adjacent district IDs
     int adj[4]; int k=0;
@@ -3562,7 +3816,7 @@ void Position::urbino_update_blocks(Square s, Color c, PieceType pt, UrbinoUndo&
     // 2) Create the new/expanded district descriptor
     UrbinoDistrict newD; newD.alive = true;
     newD.mask = square_bb(s); // single bit
-    
+    newD.colorMask[c] = square_bb(s);
     urbino_add_piece(newD.t, c, pt);
 
     // 3) If we’re merging existing districts, subtract their scores and union masks & counts
@@ -3581,6 +3835,7 @@ void Position::urbino_update_blocks(Square s, Color c, PieceType pt, UrbinoUndo&
 
         urbinoDistricts[id].alive = false;               // mark slot free; mapping will be overwritten below
     }
+
     newD.hasBlock[WHITE] = !!(newD.colorMask[WHITE]);
     newD.hasBlock[BLACK] = !!(newD.colorMask[BLACK]);
 
@@ -3608,10 +3863,16 @@ void Position::urbino_update_blocks(Square s, Color c, PieceType pt, UrbinoUndo&
     urbinoDistricts[newId] = newD;
     u.newId  = newId;
     u.newSnap = newD;
+
+#ifndef NDEBUG
+    // Verify consistency after updating blocks
+    verify_urbino_consistency();
+#endif
 }
 
 void Position::undo_move_urbino() {
     const UrbinoUndo& u = st->urbinoUndo;
+
 
     // 3) Remove the new union district and roll back scores
     if (u.newId >= 0 && urbinoDistricts[u.newId].alive) {
@@ -3626,7 +3887,7 @@ void Position::undo_move_urbino() {
     for (int i = 0; i < u.reCount; ++i)
         urbinoDistId[u.reassigned[i]] = -1; // will be set by merged snapshots below
 
-    // 5) Restore each merged district’s snapshot (mask, tallies, alive)
+    // 5) Restore each merged district's snapshot (mask, tallies, alive)
     for (int i = 0; i < u.mergedCount; ++i) {
         int id = u.mergedIds[i];
         urbinoDistricts[id] = u.mergedSnap[i];
@@ -3646,7 +3907,6 @@ void Position::undo_move_urbino() {
 
     // 6) (Optional) Restore totals exactly
     assert(urbinoScoreW == u.oldScoreW && urbinoScoreB == u.oldScoreB);
-
 }
 
 /// Position::pos_is_ok() performs some consistency checks for the

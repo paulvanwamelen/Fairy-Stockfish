@@ -45,10 +45,10 @@ struct UrbinoDistTally {
 };
 
 struct UrbinoDistrict {
-    Bitboard mask{};        // all squares in this district
+    Bitboard mask{0};        // all squares in this district
     UrbinoDistTally t{};
-    bool hasBlock[2];       // per color
-    Bitboard colorMask[2];  // per color
+    bool hasBlock[2] = {false, false};       // per color
+    Bitboard colorMask[2] = {0, 0};  // per color
     bool alive = false;
 };
 
@@ -64,7 +64,7 @@ struct UrbinoUndo {
     // Snapshot of the newly created/expanded district to remove on undo:
     UrbinoDistrict newSnap;
     // Squares we reassigned → compact list for quick undo
-    std::array<int,81> reassigned; int reCount=0;
+    std::array<int,SQUARE_NB> reassigned; int reCount=0;
 };
 
 /// StateInfo struct stores information needed to restore a Position object to
@@ -87,10 +87,8 @@ struct StateInfo {
   Square castlingKingSquare[COLOR_NB];
   Bitboard wallSquares;
   Bitboard gatesBB[COLOR_NB];
-
-  // Urbino: squares where palaces/towers cannot be placed due to adjacency rules
-  Bitboard urbinoExcludedPalaces;
-  Bitboard urbinoExcludedTowers;
+  Bitboard urbinoExcludedPalaces;  // Urbino: palace exclusion mask
+  Bitboard urbinoExcludedTowers;   // Urbino: tower exclusion mask
 
   // Not copied when making a move (will be recomputed anyhow)
   Key        key;
@@ -118,12 +116,11 @@ struct StateInfo {
   bool       pass;
   Move       move;
   int        repetition;
+  UrbinoUndo urbinoUndo;
 
   // Used by NNUE
   Eval::NNUE::Accumulator accumulator;
   DirtyPiece dirtyPiece;
-  
-  UrbinoUndo urbinoUndo;
 };
 
 
@@ -230,9 +227,12 @@ public:
   Bitboard urbino_excluded_palaces() const;
   Bitboard urbino_excluded_towers() const;
   void urbino_scores(int& white_score, int& black_score, bool debug = false) const;
+  void verify_urbino_consistency() const;
   void add_piece(UrbinoDistTally& t, Color c, PieceType pt);
   void urbino_update_blocks(Square s, Color c, PieceType pt, UrbinoUndo& u);
   void undo_move_urbino();
+  Bitboard neighbors4_bb(Bitboard bb) const;
+  void urbino_rebuild_all();
   bool urbino_legal_build_slow(Color us, Square s) const;
   bool urbino_legal_build(Color us, Square s) const;
   void urbino_add_piece(UrbinoDistTally& t, Color c, PieceType pt);
@@ -439,13 +439,12 @@ private:
   void undrop_piece(Piece pc_hand, Square s);
   Bitboard find_drop_region(Direction dir, Square s, Bitboard occupied) const;
   
-  // Urbino: For every board square, which district does it belong to? -1 = empty.
-  std::array<int8_t, 81> urbinoDistId; // index by 0..80 laid out row-major
-
-  // Urbino: Pool of districts; reuse slots on merge.
-  std::vector<UrbinoDistrict> urbinoDistricts; // size ≤ 81
-
-  // Urbino: Running totals:
+  // Urbino: 
+  // For every board square, which district does it belong to? -1 = empty.
+  std::array<int8_t, SQUARE_NB> urbinoDistId; // index by Square, note this is NOT laid out 0..80!
+  // Pool of districts; reuse slots on merge.
+  std::vector<UrbinoDistrict> urbinoDistricts; // size ≤ 41
+  // Running totals:
   int urbinoScoreW = 0, urbinoScoreB = 0;
 };
 
@@ -930,6 +929,10 @@ inline bool Position::urbino_gating() const {
   return var->urbinoGating;
 }
 
+inline Bitboard Position::neighbors4_bb(Bitboard bb) const {
+    return (shift<NORTH>(bb)|shift<SOUTH>(bb)|shift<EAST>(bb)|shift<WEST>(bb)) & board_bb();
+}
+
 inline Bitboard Position::urbino_excluded_palaces() const {
   return st->urbinoExcludedPalaces;
 }
@@ -958,13 +961,18 @@ inline void Position::urbino_add_score(const UrbinoDistTally& t, int& SW, int& S
 inline void Position::urbino_compute_points(UrbinoDistTally& t){
     const int vW = t.wH + 2*t.wP + 3*t.wT;
     const int vB = t.bH + 2*t.bP + 3*t.bT;
-    if ((vW==0 && vB>0) || (vB==0 && vW>0)) { t.owner=-1; t.pts=0; return; } // one-color → no score
+    if (vW==0 || vB==0) { t.owner=-1; t.pts=0; return; } // one-color → no score
     if (vW > vB) { t.owner=0; t.pts=vW; return; }
     if (vB > vW) { t.owner=1; t.pts=vB; return; }
     // tie-break: towers, then palaces, then houses
-    if (t.wT != t.bT) { t.owner = (t.wT > t.bT) ? 0 : 1; t.pts = vW; return; }
-    if (t.wP != t.bP) { t.owner = (t.wP > t.bP) ? 0 : 1; t.pts = vW; return; }
-    if (t.wH != t.bH) { t.owner = (t.wH > t.bH) ? 0 : 1; t.pts = vW; return; }
+    if (t.wT != t.bT) {
+        if (t.wT > t.bT) { t.owner=0; t.pts=vW; return; }
+        else { t.owner=1; t.pts=vB; return; }
+    }
+    if (t.wP != t.bP) {
+        if (t.wP > t.bP) { t.owner=0; t.pts=vW; return; }
+        else { t.owner=1; t.pts=vB; return; }
+    }
     t.owner = -1; t.pts = 0;
 }
 
@@ -1726,14 +1734,16 @@ inline Value Position::material_counting_result() const {
       break;
   case URBINO_MATERIAL:
       {
-          int scoreW, scoreB;
-          urbino_scores(scoreW, scoreB, false);
-          if (scoreW > scoreB)
+          if (urbinoScoreW > urbinoScoreB)
               result = VALUE_MATE;
-          else if (scoreB > scoreW)
+          else if (urbinoScoreB > urbinoScoreW)
               result = -VALUE_MATE;
           else
               result = VALUE_DRAW;
+          // In Urbino, the game only ends when both players pass consecutively
+          // Material counting should not trigger an immediate game end
+          // TODO: Properly detect when both players have passed
+          // result = VALUE_DRAW;
       }
       break;
   default:

@@ -1838,6 +1838,7 @@ namespace {
         v->gating = true;  // Enable gating for building placement
         v->urbinoGating = true;  // Special Urbino gating rules
         v->materialCounting = URBINO_MATERIAL;  // Use district-based scoring
+        // v->extinctionValue = VALUE_NONE;  // Disable extinction for Urbino
         return v;
     }
 #endif
