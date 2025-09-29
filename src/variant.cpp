@@ -1838,6 +1838,8 @@ namespace {
         v->gating = true;  // Enable gating for building placement
         v->urbinoGating = true;  // Special Urbino gating rules
         v->materialCounting = URBINO_MATERIAL;  // Use district-based scoring
+        // v->passOnStalemate[WHITE] = true;  // Allow pass when no legal moves. This doesn't work. Anyway Urbino doesn't have Kings so really no stalemate.
+        // v->passOnStalemate[BLACK] = true;  // Allow pass when no legal moves
         // v->extinctionValue = VALUE_NONE;  // Disable extinction for Urbino
         return v;
     }

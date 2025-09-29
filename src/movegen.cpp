@@ -20,6 +20,7 @@
 
 #include "movegen.h"
 #include "position.h"
+#include "uci.h"
 
 namespace Stockfish {
 
@@ -89,7 +90,7 @@ namespace {
         //           << " type_at_d6: " << int(type_of(pc_at_d6)) << sync_endl;
 
         // If this is ply 3 and no buildings on board (player 1 passed), only building placement allowed
-        if (pos.game_ply() == 3 && !has_buildings && from != to)
+        if ((pos.game_ply() == 2 || (pos.game_ply() == 3 && !has_buildings)) && from != to)
         {
             // sync_cout << "DEBUG make_move_and_gating: Ply 3 after pass, no buildings - no Architect moves allowed" << sync_endl;
             return moveList;  // No Architect moves allowed
@@ -605,11 +606,10 @@ namespace {
         target &= pos.board_bb();
 
         moveList = generate_pawn_moves<Us, Type>(pos, moveList, target);
-        // ExtMove* start = moveList;
+        ExtMove* start = moveList;
         // sync_cout << "DEBUG generate_all: Before generate_moves, ply " << pos.game_ply() << " total_pieces=" << popcount(pos.pieces()) << sync_endl;
         for (PieceSet ps = pos.piece_types() & ~(piece_set(PAWN) | KING); ps;)
             moveList = generate_moves<Us, Type>(pos, moveList, pop_lsb(ps), target);
-        // sync_cout << "DEBUG generate_all: After generate_moves, ply " << pos.game_ply() << " total_pieces=" << popcount(pos.pieces()) << " number of moves=" << (moveList - start) << sync_endl;
         // generate drops
         if (pos.piece_drops() && Type != CAPTURES && (pos.can_drop(Us, ALL_PIECES) || pos.two_boards()))
         {
@@ -699,6 +699,7 @@ namespace {
         {
             moveList = make_move_and_gating<SPECIAL>(pos, moveList, Us, lsb(pos.pieces(Us)), lsb(pos.pieces(Us)));
         }
+        sync_cout << "DEBUG generate_all: After generate_moves, ply " << pos.game_ply() << " total_pieces=" << popcount(pos.pieces()) << " number of moves=" << (moveList - start) << sync_endl;
     }
 
     // King moves
@@ -735,7 +736,7 @@ namespace {
 
 template<GenType Type>
 ExtMove* generate(const Position& pos, ExtMove* moveList) {
-//   sync_cout << "DEBUG generate<" << Type << "> entry: ply " << pos.game_ply() << sync_endl;
+  // sync_cout << "DEBUG generate<" << Type << "> entry: ply " << pos.game_ply() << sync_endl;
   static_assert(Type != LEGAL, "Unsupported type in generate()");
   assert((Type == EVASIONS) == (bool)pos.checkers());
 
@@ -757,7 +758,7 @@ template ExtMove* generate<NON_EVASIONS>(const Position&, ExtMove*);
 
 template<>
 ExtMove* generate<LEGAL>(const Position& pos, ExtMove* moveList) {
-
+  // sync_cout << "DEBUG generate<LEGAL> entry: ply " << pos.game_ply() << sync_endl;
   if (pos.is_immediate_game_end()) {
     //   sync_cout << "DEBUG generate<LEGAL> immediate_game_end=true, returning early" << sync_endl;
       return moveList;
@@ -768,10 +769,25 @@ ExtMove* generate<LEGAL>(const Position& pos, ExtMove* moveList) {
   moveList = pos.checkers() ? generate<EVASIONS    >(pos, moveList)
                             : generate<NON_EVASIONS>(pos, moveList);
 
+  // sync_cout << "DEBUG generate<LEGAL> after generate: ply " << pos.game_ply() << sync_endl;
+
+  // For Urbino: If NO legal moves exist and pass is allowed, generate a pass move
+  // This should only happen when the player cannot place any buildings
+  if (cur == moveList && pos.variant()->urbinoGating) {
+      // Find any architect to use for the pass move (architects are neutral in Urbino)
+      // Use SPECIAL move with from == to to represent a pass
+      Bitboard architects = pos.pieces(CUSTOM_PIECE_1);  // Get all architects regardless of color
+      if (architects) {
+          Square arch_sq = lsb(architects);
+          *moveList++ = make<SPECIAL>(arch_sq, arch_sq);
+      }
+  }
+
   while (cur != moveList) {
-      if (!pos.legal(*cur) || pos.virtual_drop(*cur))
+      if (!pos.legal(*cur) || pos.virtual_drop(*cur)) {
+          sync_cout << "DEBUG generate<LEGAL> removing illegal move: " << UCI::move(pos, *cur) << sync_endl;
           *cur = (--moveList)->move;
-      else
+      } else
           ++cur;
   }
 

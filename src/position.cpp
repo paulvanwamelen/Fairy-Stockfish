@@ -1064,6 +1064,8 @@ bool Position::legal(Move m) const {
   assert(!count<KING>(us) || piece_on(square<KING>(us)) == make_piece(us, KING));
   assert(board_bb() & to);
 
+  // sync_cout << "Testing legality of move: " << UCI::move(*this, m) << sync_endl;
+
   // Illegal checks
   if ((!checking_permitted() || (sittuyin_promotion() && type_of(m) == PROMOTION) || (!drop_checks() && type_of(m) == DROP)) && gives_check(m))
       return false;
@@ -1118,6 +1120,7 @@ bool Position::legal(Move m) const {
   // Illegal king passing move
   if (pass_on_stalemate(us) && is_pass(m) && !checkers())
   {
+      sync_cout << "Computing move list while testing whether a move in the move list is legal!" << sync_endl;
       for (const auto& move : MoveList<NON_EVASIONS>(*this))
           if (!is_pass(move) && legal(move))
               return false;
@@ -1286,6 +1289,9 @@ bool Position::legal(Move m) const {
   if (type_of(moved_piece(m)) == KING)
       return !attackers_to(to, occupied, ~us);
 
+     
+  // sync_cout << "passes legal check" << sync_endl;
+
   // Return early when without king
   if (!count<KING>(us))
       return true;
@@ -1325,6 +1331,13 @@ bool Position::pseudo_legal(const Move m) const {
             && (drop_region(us, type_of(pc)) & ~pieces() & to)
             && (   type_of(pc) == in_hand_piece_type(m)
                 || (drop_promoted() && type_of(pc) == promoted_piece_type(in_hand_piece_type(m))));
+
+  // Handle Urbino pass moves (SPECIAL move with from == to)
+//   if (urbino_gating() && type_of(m) == SPECIAL && from == to) {
+//       // Pass is allowed when passOnStalemate is set
+//       // and the piece is an architect (architects are neutral in Urbino)
+//       return pass(us) && type_of(pc) == CUSTOM_PIECE_1;
+//   }
 
   // Use a slower but simpler function for uncommon cases
   // yet we skip the legality check of MoveList<LEGAL>().
@@ -1432,7 +1445,6 @@ bool Position::pseudo_legal(const Move m) const {
 /// Position::gives_check() tests whether a pseudo-legal move gives a check
 
 bool Position::gives_check(Move m) const {
-
   assert(is_ok(m));
   // In Urbino, architects are neutral pieces, so skip color check for architect moves
   assert((urbino_gating() && (type_of(m) == SPECIAL || is_gating(m))) || color_of(moved_piece(m)) == sideToMove);
@@ -1497,6 +1509,7 @@ bool Position::gives_check(Move m) const {
           return true;
   }
 
+  sync_cout << "Check for promotion/demotion giving check" << sync_endl;
   switch (type_of(m))
   {
   case NORMAL:
@@ -1549,7 +1562,6 @@ bool Position::gives_check(Move m) const {
 /// moves should be filtered out before this function is called.
 
 void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
-
   assert(is_ok(m));
   assert(&newSt != st);
 

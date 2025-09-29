@@ -819,8 +819,9 @@ inline bool is_gating(Move m) {
   return gating_type(m) && (type_of(m) == NORMAL || type_of(m) == CASTLING);
 }
 
+// && !gating_type(m) added for urbino. No idea if this breaks some other game.
 inline bool is_pass(Move m) {
-  return type_of(m) == SPECIAL && from_sq(m) == to_sq(m);
+  return type_of(m) == SPECIAL && from_sq(m) == to_sq(m) && !gating_type(m);
 }
 
 constexpr Move make_move(Square from, Square to) {

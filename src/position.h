@@ -1734,6 +1734,7 @@ inline Value Position::material_counting_result() const {
       break;
   case URBINO_MATERIAL:
       {
+          sync_cout << "Game Over! Final Urbino scores: WHITE=" << urbinoScoreW << " BLACK=" << urbinoScoreB << sync_endl;
           if (urbinoScoreW > urbinoScoreB)
               result = VALUE_MATE;
           else if (urbinoScoreB > urbinoScoreW)

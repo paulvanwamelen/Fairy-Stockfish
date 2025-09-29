@@ -75,10 +75,6 @@ namespace {
     {
         states->emplace_back();
         pos.do_move(m, states->back());
-        sync_cout << "DEBUG UCI after do_move(" << token << "): total_pieces=" << popcount(pos.pieces())
-                  << " houses=" << popcount(pos.pieces(CUSTOM_PIECE_2))
-                  << " palaces=" << popcount(pos.pieces(CUSTOM_PIECE_3))
-                  << " towers=" << popcount(pos.pieces(CUSTOM_PIECE_4)) << sync_endl;
     }
   }
 
@@ -596,8 +592,9 @@ Move UCI::to_move(const Position& pos, string& str) {
   }
 
   for (const auto& m : MoveList<LEGAL>(pos))
-      if (str == UCI::move(pos, m) || (is_pass(m) && str == UCI::square(pos, from_sq(m)) + UCI::square(pos, to_sq(m))))
+      if (str == UCI::move(pos, m) || (is_pass(m) && str == UCI::square(pos, from_sq(m)) + UCI::square(pos, to_sq(m)))) {
           return m;
+      }
 
   return MOVE_NONE;
 }
