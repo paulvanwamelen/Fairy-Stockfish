@@ -333,8 +333,12 @@ void UCI::loop(int argc, char* argv[]) {
       is >> skipws >> token;
 
       if (    token == "quit"
-          ||  token == "stop")
+          ||  token == "stop") {
+        //   if (pos.urbino_gating()) {
+        //       sync_cout << "DEBUG: UCI received '" << token << "', setting stop=true" << sync_endl;
+        //   }
           Threads.stop = true;
+      }
 
       // The GUI sends 'ponderhit' to tell us the user has played the expected move.
       // So 'ponderhit' will be sent if we were told to ponder on the same move the

@@ -133,7 +133,14 @@ namespace {
         Square arch2 = msb(architects_after_move);
 
         // Calculate occupied squares after the architect move
-        Bitboard occupied_after_move = (pos.pieces() ^ from) | to;
+        Bitboard occupied_after_move;
+        if (from == to) {
+            // No architect move (including the "fake" a1 to a1 "pass" move), so occupied squares remain the same
+            occupied_after_move = pos.pieces();
+        } else {
+            // Architect moved, update occupied squares
+            occupied_after_move = (pos.pieces() ^ from) | to;
+        }
 
         // Calculate line of sight squares (intersection of architects' vision lines)
         // Architects see like queens in chess but cannot see through buildings
@@ -606,7 +613,7 @@ namespace {
         target &= pos.board_bb();
 
         moveList = generate_pawn_moves<Us, Type>(pos, moveList, target);
-        ExtMove* start = moveList;
+        // ExtMove* start = moveList;
         // sync_cout << "DEBUG generate_all: Before generate_moves, ply " << pos.game_ply() << " total_pieces=" << popcount(pos.pieces()) << sync_endl;
         for (PieceSet ps = pos.piece_types() & ~(piece_set(PAWN) | KING); ps;)
             moveList = generate_moves<Us, Type>(pos, moveList, pop_lsb(ps), target);
@@ -699,7 +706,7 @@ namespace {
         {
             moveList = make_move_and_gating<SPECIAL>(pos, moveList, Us, lsb(pos.pieces(Us)), lsb(pos.pieces(Us)));
         }
-        sync_cout << "DEBUG generate_all: After generate_moves, ply " << pos.game_ply() << " total_pieces=" << popcount(pos.pieces()) << " number of moves=" << (moveList - start) << sync_endl;
+        // sync_cout << "DEBUG generate_all: After generate_moves, ply " << pos.game_ply() << " total_pieces=" << popcount(pos.pieces()) << " number of moves=" << (moveList - start) << sync_endl;
     }
 
     // King moves

@@ -127,6 +127,9 @@ void Thread::idle_loop() {
 
       lk.unlock();
 
+    //   if (rootPos.urbino_gating() && this == Threads.main()) {
+    //       sync_cout << "DEBUG: idle_loop about to call search(), stop=" << Threads.stop << sync_endl;
+    //   }
       search();
   }
 }
@@ -184,6 +187,9 @@ void ThreadPool::start_thinking(Position& pos, StateListPtr& states,
   main()->wait_for_search_finished();
 
   main()->stopOnPonderhit = stop = abort = false;
+//   if (pos.urbino_gating()) {
+//       sync_cout << "DEBUG: start_thinking set stop=false" << sync_endl;
+//   }
   increaseDepth = true;
   main()->ponder = ponderMode;
   Search::Limits = limits;
@@ -235,7 +241,13 @@ void ThreadPool::start_thinking(Position& pos, StateListPtr& states,
       th->rootState = setupStates->back();
   }
 
+//   if (pos.urbino_gating()) {
+//       sync_cout << "DEBUG: start_thinking about to call main()->start_searching(), stop=" << stop << sync_endl;
+//   }
   main()->start_searching();
+//   if (pos.urbino_gating()) {
+//       sync_cout << "DEBUG: start_thinking after main()->start_searching(), stop=" << stop << sync_endl;
+//   }
 }
 
 Thread* ThreadPool::get_best_thread() const {

@@ -192,6 +192,10 @@ void Search::clear() {
 
 void MainThread::search() {
 
+//   if (rootPos.urbino_gating()) {
+//       sync_cout << "DEBUG: MainThread::search() called, stop=" << Threads.stop << sync_endl;
+//   }
+
   if (Limits.perft)
   {
       nodes = perft<true>(rootPos, Limits.perft);
@@ -204,6 +208,10 @@ void MainThread::search() {
   TT.new_search();
 
   Eval::NNUE::verify();
+
+//   if (rootPos.urbino_gating()) {
+//       sync_cout << "DEBUG: MainThread::search urbino - rootMoves.size()=" << rootMoves.size() << sync_endl;
+//   }
 
   if (rootMoves.empty() || (CurrentProtocol == XBOARD && rootPos.is_optional_game_end()))
   {
@@ -400,10 +408,19 @@ void Thread::search() {
   int searchAgainCounter = 0;
 
   // Iterative deepening loop until requested to stop or the target depth is reached
+//   if (rootPos.urbino_gating() && mainThread) {
+//       sync_cout << "DEBUG: Starting iterative deepening, rootMoves.size()=" << rootMoves.size()
+//                 << " Threads.stop=" << Threads.stop
+//                 << " rootDepth=" << rootDepth
+//                 << " Limits.depth=" << Limits.depth << sync_endl;
+//   }
   while (   ++rootDepth < MAX_PLY
          && !Threads.stop
          && !(Limits.depth && mainThread && rootDepth > Limits.depth))
   {
+    //   if (rootPos.urbino_gating() && mainThread) {
+    //       sync_cout << "DEBUG: In loop, rootDepth=" << rootDepth << " stop=" << Threads.stop << sync_endl;
+    //   }
       // Age out PV variability metric
       if (mainThread)
           totBestMoveChanges /= 2;

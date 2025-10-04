@@ -1332,12 +1332,15 @@ bool Position::pseudo_legal(const Move m) const {
             && (   type_of(pc) == in_hand_piece_type(m)
                 || (drop_promoted() && type_of(pc) == promoted_piece_type(in_hand_piece_type(m))));
 
-  // Handle Urbino pass moves (SPECIAL move with from == to)
-//   if (urbino_gating() && type_of(m) == SPECIAL && from == to) {
-//       // Pass is allowed when passOnStalemate is set
-//       // and the piece is an architect (architects are neutral in Urbino)
-//       return pass(us) && type_of(pc) == CUSTOM_PIECE_1;
-//   }
+  // Handle pass moves (SPECIAL move with from == to and no gating)
+  if (is_pass(m)) {
+      // In Urbino, pass moves are always allowed when no other moves exist
+      // These are generated as a fallback in movegen when no legal building placements are possible
+      if (urbino_gating())
+          return true;
+      // For other variants, check the pass flag
+      return pass(us) && color_of(pc) == us;
+  }
 
   // Use a slower but simpler function for uncommon cases
   // yet we skip the legality check of MoveList<LEGAL>().

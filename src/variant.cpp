@@ -1830,7 +1830,7 @@ namespace {
         v->add_piece(CUSTOM_PIECE_2, 'H', ""); // House (immobile)
         v->add_piece(CUSTOM_PIECE_3, 'P', ""); // Palace (immobile)
         v->add_piece(CUSTOM_PIECE_4, 'T', ""); // Tower (immobile)
-        v->startFen = "9/9/9/9/9/9/9/9/9[AHHHHHHHHHHHHHHHHHHTTTTTTPPPahhhhhhhhhhhhhhhhhhttttttppp] w - - 0 1";
+        v->startFen = "9/9/9/9/9/9/9/9/9[AHHHHHHHHHHHHHHHHHHPPPPPPTTTahhhhhhhhhhhhhhhhhhppppppttt] w - - 0 1";
         v->variantTemplate = "urbino";
         // In Urbino, first move places Architect, then Architect moves + building placement
         v->pieceDrops = true;  // Enable piece drops for placing buildings
@@ -1840,7 +1840,7 @@ namespace {
         v->materialCounting = URBINO_MATERIAL;  // Use district-based scoring
         // v->passOnStalemate[WHITE] = true;  // Allow pass when no legal moves. This doesn't work. Anyway Urbino doesn't have Kings so really no stalemate.
         // v->passOnStalemate[BLACK] = true;  // Allow pass when no legal moves
-        // v->extinctionValue = VALUE_NONE;  // Disable extinction for Urbino
+        v->extinctionValue = VALUE_NONE;  // Disable extinction for Urbino - no pieces can be captured
         return v;
     }
 #endif
