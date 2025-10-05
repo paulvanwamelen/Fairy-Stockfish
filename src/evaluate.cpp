@@ -1609,6 +1609,14 @@ Value Eval::evaluate(const Position& pos) {
 
   Value v;
 
+  // Urbino uses district-based scoring
+  if (pos.urbino_gating()) {
+      int white_score, black_score;
+      pos.urbino_scores(white_score, black_score);
+      v = Value((white_score - black_score) * 100);  // Scale appropriately
+      return pos.side_to_move() == WHITE ? v : -v;
+  }
+
   if (!Eval::useNNUE || !pos.nnue_applicable())
       v = Evaluation<NO_TRACE>(pos).value();
   else

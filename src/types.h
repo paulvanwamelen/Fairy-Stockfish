@@ -821,6 +821,8 @@ inline bool is_gating(Move m) {
 
 // && !gating_type(m) added for urbino. No idea if this breaks some other game.
 inline bool is_pass(Move m) {
+  if (type_of(m) == SPECIAL && from_sq(m) == to_sq(m) && !gating_type(m))
+    std::cout << "Found a pass move!" << std::endl;
   return type_of(m) == SPECIAL && from_sq(m) == to_sq(m) && !gating_type(m);
 }
 
@@ -860,10 +862,12 @@ inline bool is_custom(PieceType pt) {
 
 inline bool is_ok(Move m) {
   bool ok = from_sq(m) != to_sq(m) || type_of(m) == PROMOTION || type_of(m) == SPECIAL; // Catch MOVE_NULL and MOVE_NONE
-  if (!ok) {
-    std::cerr << "is_ok() failed for move: from=" << from_sq(m) << " to=" << to_sq(m)
-              << " type=" << type_of(m) << " move_value=" << m << std::endl;
-  }
+#ifndef NDEBUG
+  // if (!ok) {
+  //   std::cerr << "is_ok() failed for move: from=" << from_sq(m) << " to=" << to_sq(m)
+  //             << " type=" << type_of(m) << " move_value=" << m << std::endl;
+  // }
+#endif
   return ok;
 }
 

@@ -2705,6 +2705,18 @@ bool Position::see_ge(Move m, Value threshold) const {
 
 bool Position::is_optional_game_end(Value& result, int ply, int countStarted) const {
 
+  // Urbino: game ends after two consecutive passes
+  if (urbino_gating()) {
+      // Check if the last two moves were both passes (one by each player)
+      if (st->move && st->previous && st->previous->move) {
+          if (is_pass(st->move) && is_pass(st->previous->move)) {
+              // Two consecutive passes - game ends
+              result = convert_mate_value(material_counting_result(), ply);
+              return true;
+          }
+      }
+  }
+
   // n-move rule
   if (n_move_rule() && st->rule50 > (2 * n_move_rule() - 1) && (!checkers() || MoveList<LEGAL>(*this).size()))
   {
@@ -3489,6 +3501,7 @@ void print_bitboard(Bitboard bb, const std::string& name = "unknown") {
     std::cout << sync_endl;
 }
 
+#ifndef NDEBUG
 // Verify Urbino data structure consistency
 void Position::verify_urbino_consistency() const {
     if (!urbino_gating()) return;
@@ -3581,7 +3594,9 @@ void Position::verify_urbino_consistency() const {
         assert(false);
     }
 }
+#endif
 
+#ifndef NDEBUG
 bool Position::urbino_legal_build_slow(Color us, Square s) const {
     // 0) Only relevant in Urbino
     if (!urbino_gating()) return true;
@@ -3654,6 +3669,7 @@ bool Position::urbino_legal_build_slow(Color us, Square s) const {
     // that s connects to, we'd have ≥2 our-blocks in the new district.
     return ( (oursInMerged & ~connectedViaS) == 0 );
 }
+#endif
 
 bool Position::urbino_legal_build(Color us, Square s) const {
     // sync_cout << "urbino_legal_build: s = " << (char('a' + file_of(s))) << (char('1' + rank_of(s))) << sync_endl;

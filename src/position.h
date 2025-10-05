@@ -227,13 +227,17 @@ public:
   Bitboard urbino_excluded_palaces() const;
   Bitboard urbino_excluded_towers() const;
   void urbino_scores(int& white_score, int& black_score, bool debug = false) const;
+#ifndef NDEBUG
   void verify_urbino_consistency() const;
+#endif
   void add_piece(UrbinoDistTally& t, Color c, PieceType pt);
   void urbino_update_blocks(Square s, Color c, PieceType pt, UrbinoUndo& u);
   void undo_move_urbino();
   Bitboard neighbors4_bb(Bitboard bb) const;
   void urbino_rebuild_all();
+#ifndef NDEBUG
   bool urbino_legal_build_slow(Color us, Square s) const;
+#endif
   bool urbino_legal_build(Color us, Square s) const;
   void urbino_add_piece(UrbinoDistTally& t, Color c, PieceType pt);
   void urbino_sub_score(const UrbinoDistTally& t, int& SW, int& SB);

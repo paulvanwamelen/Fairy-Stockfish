@@ -233,6 +233,7 @@ namespace {
                 {
                     Square building_sq = pop_lsb(placement_squares);
                     bool isLegal = pos.urbino_legal_build(us, building_sq);
+#ifndef NDEBUG
                     /*
                     bool slowLegal = pos.urbino_legal_build_slow(us, building_sq);
                     if (isLegal != slowLegal) {
@@ -245,6 +246,7 @@ namespace {
                     assert(isLegal == slowLegal); // Sanity check
                     */
                     assert(isLegal == pos.urbino_legal_build_slow(us, building_sq)); // Sanity check
+#endif
                     if (isLegal) {
                         Move m = make_gating<T>(from, to, bpt, building_sq);
                         // sync_cout << "DEBUG: Generated gating move - from=" << from << " to=" << to
@@ -797,7 +799,7 @@ ExtMove* generate<LEGAL>(const Position& pos, ExtMove* moveList) {
       } else
           ++cur;
   }
-
+  sync_cout << "DEBUG generate<LEGAL> returning " << (moveList - cur) << " legal moves" << sync_endl;
   return moveList;
 }
 

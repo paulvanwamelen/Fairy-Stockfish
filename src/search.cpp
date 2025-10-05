@@ -1077,7 +1077,7 @@ namespace {
                     return value;
                 }
             }
-         ss->ttPv = ttPv;
+        ss->ttPv = ttPv;
     }
 
     // Step 10. If the position is not in TT, decrease depth by 2
@@ -1135,6 +1135,7 @@ moves_loop: // When in check, search starts from here
     // or a beta cutoff occurs.
     while ((move = mp.next_move(moveCountPruning)) != MOVE_NONE)
     {
+        sync_cout << "DEBUG: depth " << depth << " move " << UCI::move(pos, move) << " statScore " << (ss+2)->statScore << sync_endl;
       assert(is_ok(move));
 
       if (move == excludedMove)
@@ -1304,6 +1305,9 @@ moves_loop: // When in check, search starts from here
                                                                 [to_sq(move)];
 
       // Step 15. Make the move
+    //   sync_cout << "DEBUG: info depth " << depth
+    //       << " do_move " << UCI::move(pos, move) << sync_endl;
+
       pos.do_move(move, st, givesCheck);
 
       // Step 16. Late moves reduction / extension (LMR, ~200 Elo)
