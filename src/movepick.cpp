@@ -32,7 +32,7 @@ int history_slot(Piece pc) {
 namespace {
 
   enum Stages {
-    MAIN_TT, CAPTURE_INIT, GOOD_CAPTURE, REFUTATION, QUIET_INIT, QUIET, BAD_CAPTURE,
+    MAIN_TT, CAPTURE_INIT, GOOD_CAPTURE, REFUTATION, QUIET_INIT, QUIET, BAD_CAPTURE, FORCED_PASS,
     EVASION_TT, EVASION_INIT, EVASION,
     PROBCUT_TT, PROBCUT_INIT, PROBCUT,
     QSEARCH_TT, QCAPTURE_INIT, QCAPTURE, QCHECK_INIT, QCHECK
@@ -66,7 +66,7 @@ namespace {
 MovePicker::MovePicker(const Position& p, Move ttm, Depth d, const ButterflyHistory* mh, const GateHistory* dh, const LowPlyHistory* lp,
                        const CapturePieceToHistory* cph, const PieceToHistory** ch, Move cm, const Move* killers, int pl)
            : pos(p), mainHistory(mh), gateHistory(dh), lowPlyHistory(lp), captureHistory(cph), continuationHistory(ch),
-             ttMove(ttm), refutations{{killers[0], 0}, {killers[1], 0}, {cm, 0}}, depth(d), ply(pl) {
+             ttMove(ttm), refutations{{killers[0], 0}, {killers[1], 0}, {cm, 0}}, hasGeneratedMoves(false), depth(d), ply(pl) {
 
   assert(d > 0);
 
@@ -77,7 +77,7 @@ MovePicker::MovePicker(const Position& p, Move ttm, Depth d, const ButterflyHist
 /// MovePicker constructor for quiescence search
 MovePicker::MovePicker(const Position& p, Move ttm, Depth d, const ButterflyHistory* mh, const GateHistory* dh,
                        const CapturePieceToHistory* cph, const PieceToHistory** ch, Square rs)
-           : pos(p), mainHistory(mh), gateHistory(dh), captureHistory(cph), continuationHistory(ch), ttMove(ttm), recaptureSquare(rs), depth(d) {
+           : pos(p), mainHistory(mh), gateHistory(dh), captureHistory(cph), continuationHistory(ch), ttMove(ttm), hasGeneratedMoves(false), recaptureSquare(rs), depth(d) {
 
   assert(d <= 0);
 
@@ -90,7 +90,7 @@ MovePicker::MovePicker(const Position& p, Move ttm, Depth d, const ButterflyHist
 /// MovePicker constructor for ProbCut: we generate captures with SEE greater
 /// than or equal to the given threshold.
 MovePicker::MovePicker(const Position& p, Move ttm, Value th, const GateHistory* dh, const CapturePieceToHistory* cph)
-           : pos(p), gateHistory(dh), captureHistory(cph), ttMove(ttm), threshold(th) {
+           : pos(p), gateHistory(dh), captureHistory(cph), ttMove(ttm), hasGeneratedMoves(false), threshold(th) {
 
   assert(!pos.checkers());
 
@@ -166,6 +166,8 @@ top:
   case PROBCUT_TT:
       ++stage;
       assert(pos.legal(ttMove) == MoveList<LEGAL>(pos).contains(ttMove) || pos.virtual_drop(ttMove));
+      if (stage == MAIN_TT + 1)  // Only for main search
+          hasGeneratedMoves = true;
       return ttMove;
 
   case CAPTURE_INIT:
@@ -173,6 +175,8 @@ top:
   case QCAPTURE_INIT:
       cur = endBadCaptures = moves;
       endMoves = generate<CAPTURES>(pos, cur);
+      if (stage == CAPTURE_INIT && cur < endMoves)
+          hasGeneratedMoves = true;
 
       score<CAPTURES>();
       ++stage;
@@ -201,7 +205,10 @@ top:
       if (select<Next>([&](){ return    *cur != MOVE_NONE
                                     && !pos.capture(*cur)
                                     &&  pos.pseudo_legal(*cur); }))
+      {
+          hasGeneratedMoves = true;
           return *(cur - 1);
+      }
       ++stage;
       [[fallthrough]];
 
@@ -210,6 +217,8 @@ top:
       {
           cur = endBadCaptures;
           endMoves = generate<QUIETS>(pos, cur);
+          if (cur < endMoves)
+              hasGeneratedMoves = true;
 
           score<QUIETS>();
           partial_insertion_sort(cur, endMoves, -3000 * depth);
@@ -228,11 +237,27 @@ top:
       // Prepare the pointers to loop over the bad captures
       cur = moves;
       endMoves = endBadCaptures;
+      if (cur < endMoves)
+          hasGeneratedMoves = true;
 
       ++stage;
       [[fallthrough]];
 
   case BAD_CAPTURE:
+      if (Move m = select<Next>([](){ return true; }))
+      {
+          return m;
+      }
+      // For Urbino, try forced pass if no moves found
+      if (pos.variant()->urbinoGating && !hasGeneratedMoves)
+      {
+          cur = moves;
+          endMoves = generate<FORCEDPASS>(pos, cur);
+      }
+      ++stage;
+      [[fallthrough]];
+
+  case FORCED_PASS:
       return select<Next>([](){ return true; });
 
   case EVASION_INIT:

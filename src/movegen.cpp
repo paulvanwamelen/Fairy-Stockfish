@@ -763,6 +763,24 @@ template ExtMove* generate<QUIET_CHECKS>(const Position&, ExtMove*);
 template ExtMove* generate<NON_EVASIONS>(const Position&, ExtMove*);
 
 
+/// generate<FORCEDPASS> generates a forced pass move for Urbino when no other moves are available
+
+template<>
+ExtMove* generate<FORCEDPASS>(const Position& pos, ExtMove* moveList) {
+  // For Urbino: Generate a pass move when no other moves are available
+  if (pos.variant()->urbinoGating) {
+      // Find any architect to use for the pass move (architects are neutral in Urbino)
+      // Use SPECIAL move with from == to to represent a pass
+      Bitboard architects = pos.pieces(CUSTOM_PIECE_1);  // Get all architects regardless of color
+      if (architects) {
+          Square arch_sq = lsb(architects);
+          *moveList++ = make<SPECIAL>(arch_sq, arch_sq);
+      }
+  }
+
+  return moveList;
+}
+
 /// generate<LEGAL> generates all the legal moves in the given position
 
 template<>
@@ -780,16 +798,9 @@ ExtMove* generate<LEGAL>(const Position& pos, ExtMove* moveList) {
 
   // sync_cout << "DEBUG generate<LEGAL> after generate: ply " << pos.game_ply() << sync_endl;
 
-  // For Urbino: If NO legal moves exist and pass is allowed, generate a pass move
-  // This should only happen when the player cannot place any buildings
+  // For Urbino: If NO legal moves exist, try to generate a forced pass
   if (cur == moveList && pos.variant()->urbinoGating) {
-      // Find any architect to use for the pass move (architects are neutral in Urbino)
-      // Use SPECIAL move with from == to to represent a pass
-      Bitboard architects = pos.pieces(CUSTOM_PIECE_1);  // Get all architects regardless of color
-      if (architects) {
-          Square arch_sq = lsb(architects);
-          *moveList++ = make<SPECIAL>(arch_sq, arch_sq);
-      }
+      moveList = generate<FORCEDPASS>(pos, moveList);
   }
 
   while (cur != moveList) {
@@ -799,7 +810,7 @@ ExtMove* generate<LEGAL>(const Position& pos, ExtMove* moveList) {
       } else
           ++cur;
   }
-  sync_cout << "DEBUG generate<LEGAL> returning " << (moveList - cur) << " legal moves" << sync_endl;
+  // sync_cout << "DEBUG generate<LEGAL> returning " << (moveList - cur) << " legal moves" << sync_endl;
   return moveList;
 }
 

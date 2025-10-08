@@ -821,8 +821,8 @@ inline bool is_gating(Move m) {
 
 // && !gating_type(m) added for urbino. No idea if this breaks some other game.
 inline bool is_pass(Move m) {
-  if (type_of(m) == SPECIAL && from_sq(m) == to_sq(m) && !gating_type(m))
-    std::cout << "Found a pass move!" << std::endl;
+  // if (type_of(m) == SPECIAL && from_sq(m) == to_sq(m) && !gating_type(m))
+  //   std::cout << "Found a pass move!" << std::endl;
   return type_of(m) == SPECIAL && from_sq(m) == to_sq(m) && !gating_type(m);
 }
 

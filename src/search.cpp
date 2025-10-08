@@ -1135,7 +1135,7 @@ moves_loop: // When in check, search starts from here
     // or a beta cutoff occurs.
     while ((move = mp.next_move(moveCountPruning)) != MOVE_NONE)
     {
-        sync_cout << "DEBUG: depth " << depth << " move " << UCI::move(pos, move) << " statScore " << (ss+2)->statScore << sync_endl;
+      // sync_cout << "DEBUG: depth " << depth << " move " << UCI::move(pos, move) << " statScore " << (ss+2)->statScore << sync_endl;
       assert(is_ok(move));
 
       if (move == excludedMove)

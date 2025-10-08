@@ -2217,9 +2217,27 @@ void Position::undo_move(Move m) {
   Square to = to_sq(m);
   Piece pc = piece_on(to);
 
+  /*
+  if (!(type_of(m) == DROP || empty(from) || type_of(m) == CASTLING || is_gating(m)
+         || (type_of(m) == PROMOTION && sittuyin_promotion())
+         || (is_pass(m) && (pass(us) || var->wallOrMove || urbino_gating()))
+         || (urbino_gating() && type_of(m) == SPECIAL && from == to))) {
+        sync_cout << "DEBUG undo_move: Invalid move to undo! m=" << UCI::move(*this, m) << " from=" << from << " to=" << to
+                    << " pc=" << int(pc) << " us=" << us << " sideToMove=" << sideToMove
+                    << " type_of(m)=" << type_of(m) << " is_gating(m)=" << is_gating(m)
+                    << " sittuyin_promotion()=" << sittuyin_promotion()
+                    << " pass(us)=" << pass(us)
+                    << " var->wallOrMove=" << var->wallOrMove
+                    << " is pass(m)=" << is_pass(m)
+                    << " urbino_gating()=" << urbino_gating()
+                    << sync_endl;
+         }
+  */
+  // Allow Urbino building-only moves where architect doesn't move (SPECIAL with from==to and gating)
   assert(type_of(m) == DROP || empty(from) || type_of(m) == CASTLING || is_gating(m)
          || (type_of(m) == PROMOTION && sittuyin_promotion())
-         || (is_pass(m) && (pass(us) || var->wallOrMove)));
+         || (is_pass(m) && (pass(us) || var->wallOrMove || urbino_gating()))
+         || (urbino_gating() && type_of(m) == SPECIAL && from == to));
   assert(type_of(st->capturedPiece) != KING);
 
   // Reset wall squares
@@ -2253,7 +2271,8 @@ void Position::undo_move(Move m) {
 
   // Remove gated piece
   // In Urbino, SPECIAL moves with gating are building-only placements
-  if (is_gating(m) || (urbino_gating() && type_of(m) == SPECIAL && gating_type(m)))
+  // Skip pass moves (SPECIAL with from == to and no gating)
+  if ((is_gating(m) || (urbino_gating() && type_of(m) == SPECIAL && gating_type(m))) && !is_pass(m))
   {
       Piece gating_piece = make_piece(us, gating_type(m));
       remove_piece(gating_square(m));
@@ -2334,7 +2353,8 @@ void Position::undo_move(Move m) {
       }
   }
 
-  if (urbino_gating())
+  // Only undo Urbino state if this wasn't a pass move
+  if (urbino_gating() && !is_pass(m))
   {
       undo_move_urbino();
   }
@@ -3832,7 +3852,6 @@ void Position::urbino_rebuild_all() {
 // When we build at s, districts (and their blocks) may merge.
 void Position::urbino_update_blocks(Square s, Color c, PieceType pt, UrbinoUndo& u) {
     u.oldScoreW = urbinoScoreW; u.oldScoreB = urbinoScoreB;
-
 
     // 1) Gather unique adjacent district IDs
     int adj[4]; int k=0;
