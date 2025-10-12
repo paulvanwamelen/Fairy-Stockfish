@@ -1838,6 +1838,7 @@ namespace {
         v->add_piece(CUSTOM_PIECE_3, 'B', ""); // Palace (immobile)
         v->add_piece(CUSTOM_PIECE_4, 'R', ""); // Tower (immobile)
         v->startFen = "9/9/9/9/9/9/9/9/9[QPPPPPPPPPPPPPPPPPPBBBBBBRRRqppppppppppppppppppbbbbbbrrr] w - - 0 1";
+        v->pieceToCharTable = "P.BRQ.............p.brq.............";
         v->variantTemplate = "urbino";
         // In Urbino, first move places Architect, then Architect moves + building placement
         v->pieceDrops = true;  // Enable piece drops for placing buildings
