@@ -1613,7 +1613,18 @@ Value Eval::evaluate(const Position& pos) {
   if (pos.urbino_gating()) {
       int white_score, black_score;
       pos.urbino_scores(white_score, black_score);
-      v = Value((white_score - black_score) * 100);  // Scale appropriately
+
+      // Add bonuses for pieces in hand (unplaced buildings)
+      int white_palaces_in_hand = pos.count_in_hand(WHITE, CUSTOM_PIECE_3);
+      int black_palaces_in_hand = pos.count_in_hand(BLACK, CUSTOM_PIECE_3);
+      int white_towers_in_hand = pos.count_in_hand(WHITE, CUSTOM_PIECE_4);
+      int black_towers_in_hand = pos.count_in_hand(BLACK, CUSTOM_PIECE_4);
+
+      // Add to scores (multiply by 100 to maintain centipawn scale)
+      int white_hand_bonus = 30 * white_palaces_in_hand + 100 * white_towers_in_hand;
+      int black_hand_bonus = 30 * black_palaces_in_hand + 100 * black_towers_in_hand;
+
+      v = Value((white_score - black_score) * 100 + white_hand_bonus - black_hand_bonus);
       return pos.side_to_move() == WHITE ? v : -v;
   }
 

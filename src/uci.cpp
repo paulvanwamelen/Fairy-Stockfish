@@ -454,16 +454,19 @@ string UCI::value(Value v) {
 
   stringstream ss;
 
+  // For Urbino, use 100 as the divisor to avoid normalization by pawn value
+  int pawnValue = (Options["UCI_Variant"] == "urbino") ? 100 : PawnValueEg;
+
   if (CurrentProtocol == XBOARD)
   {
       if (abs(v) < VALUE_MATE_IN_MAX_PLY)
-          ss << v * 100 / PawnValueEg;
+          ss << v * 100 / pawnValue;
       else
           ss << (v > 0 ? XBOARD_VALUE_MATE + VALUE_MATE - v + 1 : -XBOARD_VALUE_MATE - VALUE_MATE - v - 1) / 2;
   } else
 
   if (abs(v) < VALUE_MATE_IN_MAX_PLY)
-      ss << (CurrentProtocol == UCCI ? "" : "cp ") << v * 100 / PawnValueEg;
+      ss << (CurrentProtocol == UCCI ? "" : "cp ") << v * 100 / pawnValue;
   else if (CurrentProtocol == USI)
       // In USI, mate distance is given in ply
       ss << "mate " << (v > 0 ? VALUE_MATE - v : -VALUE_MATE - v);
