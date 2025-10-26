@@ -3551,18 +3551,22 @@ void Position::urbino_scores(int& scoreW, int& scoreB, bool debug) const {
 
     // Assert that the slow recomputed scores match the incrementally maintained scores
     if (scoreW != urbinoScoreW || scoreB != urbinoScoreB) {
-        sync_cout << "ERROR: Urbino scores mismatch!" << sync_endl;
+        sync_cout << "ERROR: Urbino scores mismatch!" << (debug ? " (in urbino_scores debug call)" : "") << sync_endl;
+        sync_cout << "Last move: " << UCI::move(*this, st->move) << sync_endl;
+        sync_cout << "FEN: " << fen() << sync_endl;
         sync_cout << "Recomputed scores: WHITE(" << scoreW << ") BLACK(" << scoreB << ")" << sync_endl;
         sync_cout << "Stored scores:     WHITE(" << urbinoScoreW << ") BLACK(" << urbinoScoreB << ")" << sync_endl;
-        /*
-        // Print bitboards for debugging
-        print_bitboard(houses, "Houses");
-        print_bitboard(palaces, "Palaces");
-        print_bitboard(towers,  "Towers");
-        print_bitboard(all,     "All buildings");
-        print_bitboard(pieces(WHITE), "White pieces");
-        print_bitboard(pieces(BLACK), "Black pieces");
-        */
+        sync_cout << "Difference:        WHITE(" << (scoreW - urbinoScoreW) << ") BLACK(" << (scoreB - urbinoScoreB) << ")" << sync_endl;
+
+        // Print district details
+        sync_cout << "Districts (" << urbinoDistricts.size() << " total):" << sync_endl;
+        for (size_t i = 0; i < urbinoDistricts.size(); i++) {
+            if (!urbinoDistricts[i].alive) continue;
+            const auto& d = urbinoDistricts[i];
+            sync_cout << "  District " << i << ": wH=" << d.t.wH << " wP=" << d.t.wP << " wT=" << d.t.wT << " wB=" << d.t.wB
+                      << " | bH=" << d.t.bH << " bP=" << d.t.bP << " bT=" << d.t.bT << " bB=" << d.t.bB
+                      << " | owner=" << d.t.owner << " pts=" << d.t.pts << sync_endl;
+        }
     }
     assert(scoreW == urbinoScoreW);
     assert(scoreB == urbinoScoreB);
@@ -4038,43 +4042,43 @@ void Position::urbino_update_blocks(Square s, Color c, PieceType pt, UrbinoUndo&
             }
         } else {
             if (pt == CUSTOM_PIECE_2) {
-                if (newD.t.wB < 5) {
+                if (newD.t.bB < 5) {
                     Bitboard palacesB = pieces(CUSTOM_PIECE_3) & newD.colorMask[BLACK];
                     if ((sqr_bbs & shift<NORTH>(palacesB) & shift<SOUTH>(palacesB)) |
                         (sqr_bbs & shift<EAST>(palacesB) & shift<WEST>(palacesB))) {
-                        newD.t.wB = 5; // ducal palace
+                        newD.t.bB = 5; // ducal palace
                     }
-                    if (newD.t.wB < 3) {
+                    if (newD.t.bB < 3) {
                         Bitboard housesB = pieces(CUSTOM_PIECE_2) & newD.colorMask[BLACK];
                         if ((shift<NORTH>(housesB) & housesB & shift<SOUTH>(housesB)) |
                             (shift<EAST>(housesB) & housesB & shift<WEST>(housesB))) {
-                            newD.t.wB = 3; // town walls
+                            newD.t.bB = 3; // town walls
                         }
                     }
                 }
             } else if (pt == CUSTOM_PIECE_3) {
-                if (newD.t.wB < 8) {
+                if (newD.t.bB < 8) {
                     Bitboard towersB = pieces(CUSTOM_PIECE_4) & newD.colorMask[BLACK];
                     if ((sqr_bbs & shift<NORTH>(towersB) & shift<SOUTH>(towersB)) |
                         (sqr_bbs & shift<EAST>(towersB) & shift<WEST>(towersB))) {
-                        newD.t.wB = 8; // cathedral
+                        newD.t.bB = 8; // cathedral
                     }
-                    if (newD.t.wB < 5) {
+                    if (newD.t.bB < 5) {
                         Bitboard housesB = pieces(CUSTOM_PIECE_2) & newD.colorMask[BLACK];
                         Bitboard palacesB = pieces(CUSTOM_PIECE_3) & newD.colorMask[BLACK];
                         if ((shift<NORTH>(palacesB) & housesB & shift<SOUTH>(palacesB)) |
                             (shift<WEST>(palacesB) & housesB & shift<EAST>(palacesB))) {
-                            newD.t.wB = 5; // ducal palace
+                            newD.t.bB = 5; // ducal palace
                         }
                     }
                 }
             } else if (pt == CUSTOM_PIECE_4) {
-                if (newD.t.wB < 8) {
+                if (newD.t.bB < 8) {
                     Bitboard towersB = pieces(CUSTOM_PIECE_4) & newD.colorMask[BLACK];
                     Bitboard palacesB = pieces(CUSTOM_PIECE_3) & newD.colorMask[BLACK];
                     if ((shift<NORTH>(towersB) & palacesB & shift<SOUTH>(towersB)) |
                         (shift<WEST>(towersB) & palacesB & shift<EAST>(towersB))) {
-                        newD.t.wB = 8; // cathedral
+                            newD.t.bB = 8; // cathedral
                     }
                 }
             }
