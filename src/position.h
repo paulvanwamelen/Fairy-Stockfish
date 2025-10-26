@@ -39,6 +39,7 @@ namespace Stockfish {
 // Urbino structures - defined before StateInfo since they're used there
 struct UrbinoDistTally {
     int wH=0, wP=0, wT=0, bH=0, bP=0, bT=0; // counts by color & type
+    int wB=0, bB=0; // Monument bonusses for Monuments variant
     // Derived fields (filled by compute_points()):
     int owner = -1; // 0 = white, 1 = black, -1 = no one (tie or one-color)
     int pts   = 0;  // points credited to owner for this district
@@ -963,12 +964,16 @@ inline void Position::urbino_add_score(const UrbinoDistTally& t, int& SW, int& S
 }
 
 inline void Position::urbino_compute_points(UrbinoDistTally& t){
-    const int vW = t.wH + 2*t.wP + 3*t.wT;
-    const int vB = t.bH + 2*t.bP + 3*t.bT;
+    const int vW = t.wH + 2*t.wP + 3*t.wT + t.wB;
+    const int vB = t.bH + 2*t.bP + 3*t.bT + t.bB;
     if (vW==0 || vB==0) { t.owner=-1; t.pts=0; return; } // one-color → no score
     if (vW > vB) { t.owner=0; t.pts=vW; return; }
     if (vB > vW) { t.owner=1; t.pts=vB; return; }
     // tie-break: towers, then palaces, then houses
+    if (t.wB != t.bB) {
+        if (t.wB > t.bB) { t.owner=0; t.pts=vW; return; }
+        else { t.owner=1; t.pts=vB; return; }
+    }
     if (t.wT != t.bT) {
         if (t.wT > t.bT) { t.owner=0; t.pts=vW; return; }
         else { t.owner=1; t.pts=vB; return; }

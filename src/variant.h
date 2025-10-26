@@ -110,6 +110,7 @@ struct Variant {
   bool wallOrMove = false;
   bool seirawanGating = false;
   bool urbinoGating = false;
+  bool urbinoMonuments = false;
   bool cambodianMoves = false;
   Bitboard diagonalLines = 0;
   bool pass[COLOR_NB] = {false, false};
