@@ -62,3 +62,15 @@ python3 variantfishtest.py ../Fairy-StockfishMine/src/stockfishV1 ../Fairy-Stock
 
 
 python3 variantfishtest.py ../Fairy-StockfishMine/src/stockfishV1 ../Fairy-StockfishMine/src/stockfish -v urbino --alias 1:Old --alias 2:New --book ../Fairy-StockfishMine/urbino_openings.epd -t 1000 -i 200 -n 500 --verbosity 1 -T 16
+
+echo -e "setoption name VariantPath value variants.ini\nsetoption name UCI_Variant value monuments\nposition fen 9/H6hP/4H1h2/3hP1hH1/1tH2h2h/1p3TH2/P3paH2/h2Hh4/1Hh1p1A2[TTPPPHHHHHHHHHHttppphhhhhhhhh] b ABCDEFGHIabcdefghi - 26 14 moves a5g1pe3\nd" | ./stockfish 2>&1
+
+setoption name VariantPath value variants.ini
+setoption name UCI_Variant value monuments
+setoption name Threads value 16
+setoption name MultiPV value 5
+position startpos moves A@c3 A@i5 a1a1hg7 i5h2he5 c3i8hh7 i8c1th6 h2f6hg5 f6h2hf4 h2a5pc5 a5d4tc4 d4d3pc2 c1g4pf5 g4d4he3
+
+echo -e "setoption name VariantPath value variants.ini\nsetoption name UCI_Variant value monuments\nposition startpos moves A@c3 A@i5 a1a1hg7 i5h2he5 c3i8hh7 i8c1th6 h2f6hg5 f6h2hf4 h2a5pc5 a5d4tc4 d4d3pc2 c1g4pf5 g4d4he3\nd" | ./stockfish 2>&1
+
+(echo -e "setoption name VariantPath value variants.ini\nsetoption name UCI_Variant value monuments\nposition startpos moves A@c3 A@i5 a1a1hg7 i5h2he5 c3i8hh7 i8c1th6 h2f6hg5 f6h2hf4 h2a5pc5 a5d4tc4 d4d3pc2 c1g4pf5 g4d4he3 d4g4pe2 d3h5hh3 h5f1tg2 g4i2ph1\nd\ngo depth 6"; sleep 2; echo "quit") | ./stockfish 2>&1
