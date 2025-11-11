@@ -90,6 +90,8 @@ struct StateInfo {
   Bitboard gatesBB[COLOR_NB];
   Bitboard urbinoExcludedPalaces;  // Urbino: palace exclusion mask
   Bitboard urbinoExcludedTowers;   // Urbino: tower exclusion mask
+  Bitboard urbinoLegalBuildCache[COLOR_NB];    // Urbino: cached legal build squares per color
+  Bitboard urbinoIllegalBuildCache[COLOR_NB];  // Urbino: cached illegal build squares per color
 
   // Not copied when making a move (will be recomputed anyhow)
   Key        key;

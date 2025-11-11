@@ -2025,6 +2025,9 @@ void Position::do_move(Move m, StateInfo& newSt, bool givesCheck) {
             //   sync_cout << "DEBUG do_move before urbino_update_blocks: W=" << urbinoScoreW
             //             << " B=" << urbinoScoreB << " ply=" << game_ply() << sync_endl;
               urbino_update_blocks(gate, us, gatingType, st->urbinoUndo);
+              // Invalidate cache since districts changed
+              st->urbinoLegalBuildCache[WHITE] = st->urbinoLegalBuildCache[BLACK] = 0;
+              st->urbinoIllegalBuildCache[WHITE] = st->urbinoIllegalBuildCache[BLACK] = 0;
           }
           else if (urbino_gating()) {
               std::cerr << "WARNING: Urbino building placed but blocks not updated! gatingType=" << gatingType
@@ -3769,7 +3772,15 @@ bool Position::urbino_legal_build_slow(Color us, Square s) const {
 #endif
 
 bool Position::urbino_legal_build(Color us, Square s) const {
-    // sync_cout << "urbino_legal_build: s = " << (char('a' + file_of(s))) << (char('1' + rank_of(s))) << sync_endl;
+    Bitboard sq_bb = square_bb(s);
+
+    // Check if we've already computed this square
+    if ((st->urbinoLegalBuildCache[us] | st->urbinoIllegalBuildCache[us]) & sq_bb) {
+        // Already cached
+        return st->urbinoLegalBuildCache[us] & sq_bb;
+    }
+
+    // Not cached - compute for this square only
     int adj[4], k=0; // dedup district ids around s
     for_each_orth_neighbor(s, [&](int t){
         int id = urbinoDistId[t];
@@ -3777,48 +3788,42 @@ bool Position::urbino_legal_build(Color us, Square s) const {
             adj[k++] = id;
         }
     });
-    // std::cout << "urbino_legal_build: k = " << k << " adj:";
-    // for (int i=0;i<k;i++) std::cout << " " << adj[i];
-    // std::cout << std::endl;
-    if (k==0) return true; // new 1-color district with our piece only. Always OK
+
+    if (k==0) {
+        // new 1-color district with our piece only. Always OK
+        st->urbinoLegalBuildCache[us] |= sq_bb;
+        return true;
+    }
 
     // Opponent: must not appear in ≥2 adj districts
     Color them = ~us;
-    int opp = 0; 
-    // for (int i=0;i<k;i++) {
-    //     if (urbinoDistricts[adj[i]].hasBlock[them]) {
-    //         // print_bitboard(urbinoDistricts[adj[i]].colorMask[them], "them district");
-    //     }
-    //     opp += urbinoDistricts[adj[i]].hasBlock[them];
-    // }
-    // if (opp > 1) {
-    //     // sync_cout << "urbino_legal_build: opp > 1" << sync_endl;
-    //     return false;
-    // }
+    int opp = 0;
+
     for (int i=0;i<k;i++) {
         if (urbinoDistricts[adj[i]].hasBlock[them]) {
             if (opp == 1) {
-                // print_bitboard(urbinoDistricts[adj[i]].colorMask[them], "them district");
-                // sync_cout << "urbino_legal_build: opp > 1" << sync_endl;
+                // Illegal - cache and return
+                st->urbinoIllegalBuildCache[us] |= sq_bb;
                 return false;
             }
             opp = 1;
-            // print_bitboard(urbinoDistricts[adj[i]].colorMask[them], "them district");
         }
     }
 
     // Ours: if we appear, s must be adjacent to every our-block among adj districts
-    Bitboard myNbr = (shift<NORTH>(square_bb(s))|shift<SOUTH>(square_bb(s))|
-                      shift<EAST >(square_bb(s))|shift<WEST >(square_bb(s))) & (pieces(us) | pieces(them));
+    Bitboard myNbr = (shift<NORTH>(sq_bb)|shift<SOUTH>(sq_bb)|
+                      shift<EAST >(sq_bb)|shift<WEST >(sq_bb)) & (pieces(us) | pieces(them));
     for (int i=0;i<k;i++){
         if (urbinoDistricts[adj[i]].hasBlock[us] && !(myNbr & urbinoDistricts[adj[i]].colorMask[us])){
-            // print_bitboard(myNbr, "myNbr");
-            // print_bitboard(urbinoDistricts[adj[i]].colorMask[us], "bad district");
-            // sync_cout << "urbino_legal_build: introducing second our-block" << sync_endl;
-            return false; // we'd introduce a second our-block
+            // Illegal - cache and return
+            st->urbinoIllegalBuildCache[us] |= sq_bb;
+            return false;
         }
     }
-    return true; // either mine==0 or we touch every our-block
+
+    // Legal - cache and return
+    st->urbinoLegalBuildCache[us] |= sq_bb;
+    return true;
 }
 
 /*
@@ -3865,6 +3870,8 @@ void Position::urbino_rebuild_all() {
     urbinoDistId.fill(-1);
     urbinoDistricts.clear();
     st->urbinoExcludedPalaces = st->urbinoExcludedTowers = 0;
+    st->urbinoLegalBuildCache[WHITE] = st->urbinoLegalBuildCache[BLACK] = 0;
+    st->urbinoIllegalBuildCache[WHITE] = st->urbinoIllegalBuildCache[BLACK] = 0;
     urbinoScoreW = urbinoScoreB = 0;
 
     // 1) Collect building bitboards (mask to board!)
@@ -3975,132 +3982,166 @@ void Position::urbino_update_blocks(Square s, Color c, PieceType pt, UrbinoUndo&
         }
     });
 
-    // 2) Create the new/expanded district descriptor
-    UrbinoDistrict newD; newD.alive = true;
+    // 2) Optimization: Reuse first adjacent district if merging, else create new
+    int newId;
+    UrbinoDistrict* newD_ptr;
     Bitboard sqr_bbs = square_bb(s);
-    newD.mask = sqr_bbs; // single bit
-    newD.colorMask[c] = sqr_bbs;
-    urbino_add_piece(newD.t, c, pt);
 
-    // 3) If we’re merging existing districts, subtract their scores and union masks & counts
-    for (int i=0;i<k;i++){
-        int id = adj[i];
-        u.mergedSnap[i] = urbinoDistricts[id];           // snapshot for undo
-        u.mergedIds[i]  = id;
+    if (k > 0) {
+        // REUSE first adjacent district (most common case)
+        newId = adj[0];
+        newD_ptr = &urbinoDistricts[newId];
+
+        // Snapshot for undo
+        u.mergedSnap[0] = *newD_ptr;
+        u.mergedIds[0] = newId;
         ++u.mergedCount;
 
-        urbino_sub_score(urbinoDistricts[id].t, urbinoScoreW, urbinoScoreB);
-        newD.mask |= urbinoDistricts[id].mask;           // union area
-        newD.colorMask[WHITE] |= urbinoDistricts[id].colorMask[WHITE];
-        newD.colorMask[BLACK] |= urbinoDistricts[id].colorMask[BLACK];
-        newD.t.wH += urbinoDistricts[id].t.wH; newD.t.wP += urbinoDistricts[id].t.wP; newD.t.wT += urbinoDistricts[id].t.wT;
-        newD.t.bH += urbinoDistricts[id].t.bH; newD.t.bP += urbinoDistricts[id].t.bP; newD.t.bT += urbinoDistricts[id].t.bT;
-        if (variant()->urbinoMonuments) {
-            if (urbinoDistricts[id].t.wB > newD.t.wB) newD.t.wB = urbinoDistricts[id].t.wB;
-            if (urbinoDistricts[id].t.bB > newD.t.bB) newD.t.bB = urbinoDistricts[id].t.bB;
+        // Subtract old score
+        urbino_sub_score(newD_ptr->t, urbinoScoreW, urbinoScoreB);
+
+        // Update in-place with new building
+        newD_ptr->mask |= sqr_bbs;
+        newD_ptr->colorMask[c] |= sqr_bbs;
+        urbino_add_piece(newD_ptr->t, c, pt);
+
+        // Merge remaining adjacent districts (if any)
+        for (int i = 1; i < k; i++) {
+            int id = adj[i];
+            u.mergedSnap[i] = urbinoDistricts[id];
+            u.mergedIds[i] = id;
+            ++u.mergedCount;
+
+            urbino_sub_score(urbinoDistricts[id].t, urbinoScoreW, urbinoScoreB);
+            newD_ptr->mask |= urbinoDistricts[id].mask;
+            newD_ptr->colorMask[WHITE] |= urbinoDistricts[id].colorMask[WHITE];
+            newD_ptr->colorMask[BLACK] |= urbinoDistricts[id].colorMask[BLACK];
+            newD_ptr->t.wH += urbinoDistricts[id].t.wH; newD_ptr->t.wP += urbinoDistricts[id].t.wP; newD_ptr->t.wT += urbinoDistricts[id].t.wT;
+            newD_ptr->t.bH += urbinoDistricts[id].t.bH; newD_ptr->t.bP += urbinoDistricts[id].t.bP; newD_ptr->t.bT += urbinoDistricts[id].t.bT;
+            if (variant()->urbinoMonuments) {
+                if (urbinoDistricts[id].t.wB > newD_ptr->t.wB) newD_ptr->t.wB = urbinoDistricts[id].t.wB;
+                if (urbinoDistricts[id].t.bB > newD_ptr->t.bB) newD_ptr->t.bB = urbinoDistricts[id].t.bB;
+            }
+
+            urbinoDistricts[id].alive = false;  // mark merged districts dead
+        }
+    } else {
+        // No adjacent districts - create new district
+        // Find free slot
+        newId = -1;
+        for (int i = 0; i < (int)urbinoDistricts.size(); ++i) {
+            if (!urbinoDistricts[i].alive) {
+                newId = i;
+                break;
+            }
+        }
+        if (newId == -1) {
+            newId = (int)urbinoDistricts.size();
+            urbinoDistricts.push_back({});
         }
 
-        urbinoDistricts[id].alive = false;               // mark slot free; mapping will be overwritten below
+        newD_ptr = &urbinoDistricts[newId];
+        newD_ptr->alive = true;
+        newD_ptr->mask = sqr_bbs;
+        newD_ptr->colorMask[WHITE] = newD_ptr->colorMask[BLACK] = 0;
+        newD_ptr->colorMask[c] = sqr_bbs;
+        newD_ptr->t = {};
+        urbino_add_piece(newD_ptr->t, c, pt);
     }
     if (variant()->urbinoMonuments) {
         if (c == WHITE) {
             if (pt == CUSTOM_PIECE_2) {
-                if (newD.t.wB < 5) {
-                    Bitboard palacesW = pieces(CUSTOM_PIECE_3) & newD.colorMask[WHITE];
+                if (newD_ptr->t.wB < 5) {
+                    Bitboard palacesW = pieces(CUSTOM_PIECE_3) & newD_ptr->colorMask[WHITE];
                     if ((sqr_bbs & shift<NORTH>(palacesW) & shift<SOUTH>(palacesW)) |
                         (sqr_bbs & shift<EAST>(palacesW) & shift<WEST>(palacesW))) {
-                        newD.t.wB = 5; // ducal palace
+                        newD_ptr->t.wB = 5; // ducal palace
                     }
-                    if (newD.t.wB < 3) {
-                        Bitboard housesW = pieces(CUSTOM_PIECE_2) & newD.colorMask[WHITE];
+                    if (newD_ptr->t.wB < 3) {
+                        Bitboard housesW = pieces(CUSTOM_PIECE_2) & newD_ptr->colorMask[WHITE];
                         if ((shift<NORTH>(housesW) & housesW & shift<SOUTH>(housesW)) |
                             (shift<EAST>(housesW) & housesW & shift<WEST>(housesW))) {
-                            newD.t.wB = 3; // town walls
+                            newD_ptr->t.wB = 3; // town walls
                         }
                     }
                 }
             } else if (pt == CUSTOM_PIECE_3) {
-                if (newD.t.wB < 8) {
-                    Bitboard towersW = pieces(CUSTOM_PIECE_4) & newD.colorMask[WHITE];
+                if (newD_ptr->t.wB < 8) {
+                    Bitboard towersW = pieces(CUSTOM_PIECE_4) & newD_ptr->colorMask[WHITE];
                     if ((sqr_bbs & shift<NORTH>(towersW) & shift<SOUTH>(towersW)) |
                         (sqr_bbs & shift<EAST>(towersW) & shift<WEST>(towersW))) {
-                        newD.t.wB = 8; // cathedral
+                        newD_ptr->t.wB = 8; // cathedral
                     }
-                    if (newD.t.wB < 5) {
-                        Bitboard housesW = pieces(CUSTOM_PIECE_2) & newD.colorMask[WHITE];
-                        Bitboard palacesW = pieces(CUSTOM_PIECE_3) & newD.colorMask[WHITE];
+                    if (newD_ptr->t.wB < 5) {
+                        Bitboard housesW = pieces(CUSTOM_PIECE_2) & newD_ptr->colorMask[WHITE];
+                        Bitboard palacesW = pieces(CUSTOM_PIECE_3) & newD_ptr->colorMask[WHITE];
                         if ((shift<NORTH>(palacesW) & housesW & shift<SOUTH>(palacesW)) |
                             (shift<WEST>(palacesW) & housesW & shift<EAST>(palacesW))) {
-                            newD.t.wB = 5; // ducal palace
+                            newD_ptr->t.wB = 5; // ducal palace
                         }
                     }
                 }
             } else if (pt == CUSTOM_PIECE_4) {
-                if (newD.t.wB < 8) {
-                    Bitboard towersW = pieces(CUSTOM_PIECE_4) & newD.colorMask[WHITE];
-                    Bitboard palacesW = pieces(CUSTOM_PIECE_3) & newD.colorMask[WHITE];
+                if (newD_ptr->t.wB < 8) {
+                    Bitboard towersW = pieces(CUSTOM_PIECE_4) & newD_ptr->colorMask[WHITE];
+                    Bitboard palacesW = pieces(CUSTOM_PIECE_3) & newD_ptr->colorMask[WHITE];
                     if ((shift<NORTH>(towersW) & palacesW & shift<SOUTH>(towersW)) |
                         (shift<WEST>(towersW) & palacesW & shift<EAST>(towersW))) {
-                        newD.t.wB = 8; // cathedral
+                        newD_ptr->t.wB = 8; // cathedral
                     }
                 }
             }
         } else {
             if (pt == CUSTOM_PIECE_2) {
-                if (newD.t.bB < 5) {
-                    Bitboard palacesB = pieces(CUSTOM_PIECE_3) & newD.colorMask[BLACK];
+                if (newD_ptr->t.bB < 5) {
+                    Bitboard palacesB = pieces(CUSTOM_PIECE_3) & newD_ptr->colorMask[BLACK];
                     if ((sqr_bbs & shift<NORTH>(palacesB) & shift<SOUTH>(palacesB)) |
                         (sqr_bbs & shift<EAST>(palacesB) & shift<WEST>(palacesB))) {
-                        newD.t.bB = 5; // ducal palace
+                        newD_ptr->t.bB = 5; // ducal palace
                     }
-                    if (newD.t.bB < 3) {
-                        Bitboard housesB = pieces(CUSTOM_PIECE_2) & newD.colorMask[BLACK];
+                    if (newD_ptr->t.bB < 3) {
+                        Bitboard housesB = pieces(CUSTOM_PIECE_2) & newD_ptr->colorMask[BLACK];
                         if ((shift<NORTH>(housesB) & housesB & shift<SOUTH>(housesB)) |
                             (shift<EAST>(housesB) & housesB & shift<WEST>(housesB))) {
-                            newD.t.bB = 3; // town walls
+                            newD_ptr->t.bB = 3; // town walls
                         }
                     }
                 }
             } else if (pt == CUSTOM_PIECE_3) {
-                if (newD.t.bB < 8) {
-                    Bitboard towersB = pieces(CUSTOM_PIECE_4) & newD.colorMask[BLACK];
+                if (newD_ptr->t.bB < 8) {
+                    Bitboard towersB = pieces(CUSTOM_PIECE_4) & newD_ptr->colorMask[BLACK];
                     if ((sqr_bbs & shift<NORTH>(towersB) & shift<SOUTH>(towersB)) |
                         (sqr_bbs & shift<EAST>(towersB) & shift<WEST>(towersB))) {
-                        newD.t.bB = 8; // cathedral
+                        newD_ptr->t.bB = 8; // cathedral
                     }
-                    if (newD.t.bB < 5) {
-                        Bitboard housesB = pieces(CUSTOM_PIECE_2) & newD.colorMask[BLACK];
-                        Bitboard palacesB = pieces(CUSTOM_PIECE_3) & newD.colorMask[BLACK];
+                    if (newD_ptr->t.bB < 5) {
+                        Bitboard housesB = pieces(CUSTOM_PIECE_2) & newD_ptr->colorMask[BLACK];
+                        Bitboard palacesB = pieces(CUSTOM_PIECE_3) & newD_ptr->colorMask[BLACK];
                         if ((shift<NORTH>(palacesB) & housesB & shift<SOUTH>(palacesB)) |
                             (shift<WEST>(palacesB) & housesB & shift<EAST>(palacesB))) {
-                            newD.t.bB = 5; // ducal palace
+                            newD_ptr->t.bB = 5; // ducal palace
                         }
                     }
                 }
             } else if (pt == CUSTOM_PIECE_4) {
-                if (newD.t.bB < 8) {
-                    Bitboard towersB = pieces(CUSTOM_PIECE_4) & newD.colorMask[BLACK];
-                    Bitboard palacesB = pieces(CUSTOM_PIECE_3) & newD.colorMask[BLACK];
+                if (newD_ptr->t.bB < 8) {
+                    Bitboard towersB = pieces(CUSTOM_PIECE_4) & newD_ptr->colorMask[BLACK];
+                    Bitboard palacesB = pieces(CUSTOM_PIECE_3) & newD_ptr->colorMask[BLACK];
                     if ((shift<NORTH>(towersB) & palacesB & shift<SOUTH>(towersB)) |
                         (shift<WEST>(towersB) & palacesB & shift<EAST>(towersB))) {
-                            newD.t.bB = 8; // cathedral
+                            newD_ptr->t.bB = 8; // cathedral
                     }
                 }
             }
         }
     }
 
-    newD.hasBlock[WHITE] = !!(newD.colorMask[WHITE]);
-    newD.hasBlock[BLACK] = !!(newD.colorMask[BLACK]);
+    newD_ptr->hasBlock[WHITE] = !!(newD_ptr->colorMask[WHITE]);
+    newD_ptr->hasBlock[BLACK] = !!(newD_ptr->colorMask[BLACK]);
 
-    // 4) Allocate a district id (reuse first freed or push_back)
-    int newId = -1;
-    for (int i=0;i<(int)urbinoDistricts.size();++i) if (!urbinoDistricts[i].alive){ newId = i; break; }
-    if (newId==-1){ newId = (int)urbinoDistricts.size(); urbinoDistricts.push_back({}); }
-
-    // 5) Assign squares in the new union to newId (update mapping)
-    //    Iterate bits in newD.mask; record for undo
-    Bitboard m = newD.mask;
+    // 4) Assign squares in the new union to newId (update mapping)
+    //    Iterate bits in newD_ptr->mask; record for undo
+    Bitboard m = newD_ptr->mask;
     while (m){
         int q = pop_lsb(m);          // 0..80
         if (urbinoDistId[q] != newId){           // remember only changes
@@ -4109,14 +4150,13 @@ void Position::urbino_update_blocks(Square s, Color c, PieceType pt, UrbinoUndo&
         }
     }
 
-    // 6) Finalize & add its score
-    urbino_compute_points(newD.t);
-    urbino_add_score(newD.t, urbinoScoreW, urbinoScoreB);
+    // 5) Finalize & add its score
+    urbino_compute_points(newD_ptr->t);
+    urbino_add_score(newD_ptr->t, urbinoScoreW, urbinoScoreB);
 
-    // 7) Store
-    urbinoDistricts[newId] = newD;
+    // 6) Save for undo (district already modified in-place)
     u.newId  = newId;
-    u.newSnap = newD;
+    u.newSnap = *newD_ptr;
 
 #ifndef NDEBUG
     // Verify consistency after updating blocks

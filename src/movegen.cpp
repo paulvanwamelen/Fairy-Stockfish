@@ -97,22 +97,6 @@ namespace {
         }
 
         // // After both architects are placed and at least one building exists, allow full moves
-        // // This handles both the normal flow and the swap case
-        // if (has_buildings)
-        // {
-        //     // Buildings exist, so we're past the initial placement phase - allow architect moves
-        // }
-        // else if (pos.game_ply() < 2)
-        // {
-        //     // Still placing architects, no architect moves allowed
-        //     if (from != to)
-        //         return moveList;
-        // }
-        // else if (from != to)
-        // {
-        //     // Ply 2+ but no buildings yet (swap happened), no architect moves
-        //     return moveList;
-        // }
 
         // Generate moves with building placement
         PieceType building_types[] = {CUSTOM_PIECE_2, CUSTOM_PIECE_3, CUSTOM_PIECE_4}; // House, Palace, Tower
