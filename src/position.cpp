@@ -1512,7 +1512,6 @@ bool Position::gives_check(Move m) const {
           return true;
   }
 
-  sync_cout << "Check for promotion/demotion giving check" << sync_endl;
   switch (type_of(m))
   {
   case NORMAL:
@@ -3951,9 +3950,10 @@ void Position::urbino_rebuild_all() {
         else if (D.t.owner==1) urbinoScoreB += D.t.pts;
     }
 
-    // 5) Exclusion masks (orth-adjacent to any palace/tower, only empty squares matter in gen)
-    st->urbinoExcludedPalaces = neighbors4_bb(P) & ~ALL;
-    st->urbinoExcludedTowers  = neighbors4_bb(T) & ~ALL;
+    // 5) Exclusion masks (orth-adjacent to any palace/tower)
+    // Must include ALL neighbors (not just empty), consistent with incremental updates in do_move
+    st->urbinoExcludedPalaces = neighbors4_bb(P);
+    st->urbinoExcludedTowers  = neighbors4_bb(T);
 }
 
 // When we build at s, districts (and their blocks) may merge.

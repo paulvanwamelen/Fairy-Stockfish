@@ -181,7 +181,7 @@ namespace {
   void bench(Position& pos, istream& args, StateListPtr& states) {
 
     string token;
-    uint64_t num, nodes = 0, cnt = 1;
+    uint64_t num, nodes = 0, cnt = 1, signature = 0;
 
     vector<string> list = setup_bench(pos, args);
     num = count_if(list.begin(), list.end(), [](string s) { return s.find("go ") == 0 || s.find("eval") == 0; });
@@ -201,6 +201,10 @@ namespace {
                go(pos, is, states);
                Threads.main()->wait_for_search_finished();
                nodes += Threads.nodes_searched();
+
+               // Accumulate signature from bestmove
+               if (!Threads.main()->rootMoves.empty())
+                   signature ^= Threads.main()->rootMoves[0].pv[0] + nodes + cnt;
             }
             else
                trace_eval(pos);
@@ -217,7 +221,8 @@ namespace {
     cerr << "\n==========================="
          << "\nTotal time (ms) : " << elapsed
          << "\nNodes searched  : " << nodes
-         << "\nNodes/second    : " << 1000 * nodes / elapsed << endl;
+         << "\nNodes/second    : " << 1000 * nodes / elapsed
+         << "\nSignature       : " << signature << endl;
   }
 
   // The win rate model returns the probability (per mille) of winning given an eval

@@ -74,3 +74,5 @@ position startpos moves A@c3 A@i5 a1a1hg7 i5h2he5 c3i8hh7 i8c1th6 h2f6hg5 f6h2hf
 echo -e "setoption name VariantPath value variants.ini\nsetoption name UCI_Variant value monuments\nposition startpos moves A@c3 A@i5 a1a1hg7 i5h2he5 c3i8hh7 i8c1th6 h2f6hg5 f6h2hf4 h2a5pc5 a5d4tc4 d4d3pc2 c1g4pf5 g4d4he3\nd" | ./stockfish 2>&1
 
 (echo -e "setoption name VariantPath value variants.ini\nsetoption name UCI_Variant value monuments\nposition startpos moves A@c3 A@i5 a1a1hg7 i5h2he5 c3i8hh7 i8c1th6 h2f6hg5 f6h2hf4 h2a5pc5 a5d4tc4 d4d3pc2 c1g4pf5 g4d4he3 d4g4pe2 d3h5hh3 h5f1tg2 g4i2ph1\nd\ngo depth 6"; sleep 2; echo "quit") | ./stockfish 2>&1
+
+(echo -e "setoption name VariantPath value variants.ini\nsetoption name UCI_Variant value monuments\nsetoption name Threads value 1\nsetoption name MultiPV value 5\nposition startpos moves A@d4 A@i5 d4d4 a1a1hg7 i5i3hf6 d4d2hg5 i3e5hf4 d2d6pe6 d6f5te4 f5a6td6 a6e3pc5 e3c4hd4 e5b4hb5 b4c2td3 c2a4h a4b3hb4 b3b1ha2 a1a1pb3\nd\ngo depth 6"; sleep 2; echo "quit") | ./stockfish 2>&1

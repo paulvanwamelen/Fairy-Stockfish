@@ -589,6 +589,60 @@ namespace {
     // sync_cout << "DEBUG generate_all entry: ply " << pos.game_ply() << " total_pieces=" << popcount(pos.pieces()) << sync_endl;
     static_assert(Type != LEGAL, "Unsupported type in generate_all()");
 
+    // URBINO FAST PATH: Skip all the variant checks
+    if (pos.urbino_gating())
+    {
+        // Urbino has NO pawns, NO kings, NO castling, NO captures
+        // Only Architects (CUSTOM_PIECE_1) that move + Buildings via drops/gating
+
+        Bitboard target = Type == NON_EVASIONS ? ~pos.pieces(Us)
+                        : Type == CAPTURES     ?  0  // Urbino has no captures
+                                               : ~pos.pieces();  // QUIETS || QUIET_CHECKS
+        target &= pos.board_bb();
+
+        // Generate Architect moves (CUSTOM_PIECE_1) - they can move to any empty square
+        if (Type != CAPTURES)  // No captures in Urbino
+        {
+            moveList = generate_moves<Us, Type>(pos, moveList, CUSTOM_PIECE_1, target);
+        }
+
+        // Generate building placement (piece drops + gating)
+        if (pos.piece_drops() && Type != CAPTURES)
+        {
+            if (pos.game_ply() < 2)
+            {
+                // First move for each player: only drop Architect
+                moveList = generate_drops<Us, Type>(pos, moveList, CUSTOM_PIECE_1, target & ~pos.pieces(~Us));
+            }
+            else if (pos.game_ply() == 2)
+            {
+                // Third move: place building or pass
+                Square dummy_sq = SQ_A1;
+                moveList = make_move_and_gating<SPECIAL>(pos, moveList, Us, dummy_sq, dummy_sq);
+
+                // Generate pass move
+                Square arch_sq = lsb(pos.pieces(Us, CUSTOM_PIECE_1));
+                if (arch_sq != SQ_NONE)
+                    *moveList++ = make<SPECIAL>(arch_sq, arch_sq);
+            }
+            else if (pos.game_ply() == 3 && pos.pieces(CUSTOM_PIECE_2) == 0 && pos.pieces(CUSTOM_PIECE_3) == 0 && pos.pieces(CUSTOM_PIECE_4) == 0)
+            {
+                // After pass, place buildings only
+                Square dummy_sq = SQ_A1;
+                moveList = make_move_and_gating<SPECIAL>(pos, moveList, Us, dummy_sq, dummy_sq);
+            }
+            else
+            {
+                // Normal play: building placement via gating
+                Square dummy_sq = SQ_A1;
+                moveList = make_move_and_gating<SPECIAL>(pos, moveList, Us, dummy_sq, dummy_sq);
+            }
+        }
+
+        return moveList;
+    }
+
+    // CHESS/FAIRY PATH (only used during initialization, not during Urbino gameplay)
     constexpr bool Checks = Type == QUIET_CHECKS; // Reduce template instantiations
     const Square ksq = pos.count<KING>(Us) ? pos.square<KING>(Us) : SQ_NONE;
     Bitboard target;
