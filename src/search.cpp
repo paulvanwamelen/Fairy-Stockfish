@@ -691,7 +691,9 @@ namespace {
 
     // Check if we have an upcoming move which draws by repetition, or
     // if the opponent had an alternative move earlier to this position.
+    // Urbino uses material counting, so has_game_cycle always returns false - skip it
     if (   !rootNode
+        && !pos.urbino_gating()
         && pos.rule50_count() >= 3
         && alpha < VALUE_DRAW
         && pos.has_game_cycle(ss->ply))

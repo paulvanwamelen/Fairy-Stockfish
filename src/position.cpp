@@ -1066,6 +1066,11 @@ bool Position::legal(Move m) const {
 
   // sync_cout << "Testing legality of move: " << UCI::move(*this, m) << sync_endl;
 
+  // URBINO FAST PATH: No kings, no captures, no checks, no castling
+  // All pseudo-legal moves are legal in Urbino
+  if (urbino_gating())
+      return true;
+
   // Illegal checks
   if ((!checking_permitted() || (sittuyin_promotion() && type_of(m) == PROMOTION) || (!drop_checks() && type_of(m) == DROP)) && gives_check(m))
       return false;
