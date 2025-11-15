@@ -75,4 +75,21 @@ echo -e "setoption name VariantPath value variants.ini\nsetoption name UCI_Varia
 
 (echo -e "setoption name VariantPath value variants.ini\nsetoption name UCI_Variant value monuments\nposition startpos moves A@c3 A@i5 a1a1hg7 i5h2he5 c3i8hh7 i8c1th6 h2f6hg5 f6h2hf4 h2a5pc5 a5d4tc4 d4d3pc2 c1g4pf5 g4d4he3 d4g4pe2 d3h5hh3 h5f1tg2 g4i2ph1\nd\ngo depth 6"; sleep 2; echo "quit") | ./stockfish 2>&1
 
-(echo -e "setoption name VariantPath value variants.ini\nsetoption name UCI_Variant value monuments\nsetoption name Threads value 1\nsetoption name MultiPV value 5\nposition startpos moves A@d4 A@i5 d4d4 a1a1hg7 i5i3hf6 d4d2hg5 i3e5hf4 d2d6pe6 d6f5te4 f5a6td6 a6e3pc5 e3c4hd4 e5b4hb5 b4c2td3 c2a4h a4b3hb4 b3b1ha2 a1a1pb3\nd\ngo depth 6"; sleep 2; echo "quit") | ./stockfish 2>&1
+(echo -e "setoption name VariantPath value variants.ini\nsetoption name UCI_Variant value monuments\nsetoption name Threads value 1\nsetoption name MultiPV value 5\nposition startpos moves A@d4 A@i5 d4d4 a1a1hg7 i5i3hf6 d4d2hg5 i3e5hf4 d2d6pe6 d6f5te4 f5a6td6 a6e3pc5 e3c4hd4 e5b4hb5 b4c2td3 c2a4h a4b3hb4 b3b1ha2 a1a1pb3\nd\ngo depth 6"; sleep 5; echo "quit") | ./stockfish 2>&1
+(echo -e "setoption name UCI_Variant value urbino\nsetoption name Threads value 1\nsetoption name MultiPV value 5\nposition startpos moves A@c3 A@a8 a1a1h c3i2ha2 a8c8hc2 i2a5hc3 c8e9hc7 e9g9ha3 a5g1hc5 g1g3hd6 g9d1hf3 d1f9pf4 g3i7td7 i7g6tf5 g6c8hf8 c8h8hg8 h8c8te8 c8a9hd9 f9b8pc9 b8e4ta4\nd\ngo depth 6"; sleep 5; echo "quit") | ./stockfish 2>&1
+
+
+setoption name Hash value
+   8
+
+python3 variantfishtest.py \
+    ../Fairy-StockfishMine/src/stockfish_phase_tower \
+    ../Fairy-StockfishMine/src/stockfish_no_palace_penalty \
+    -v urbino \
+    --alias 1:WithPalace --alias 2:NoPalace \
+    --book ../Fairy-StockfishMine/urbino_openings.epd \
+    -t 3000 -i 300 \
+    -s --elo0 0 --elo1 10 \
+    --verbosity 1 -T 16   
+
+    Total: 144 W: 60 L: 73 D: 11 LLR: -0.47 (-2.94,2.94) [0.00,10.00]

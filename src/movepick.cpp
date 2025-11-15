@@ -107,6 +107,8 @@ void MovePicker::score() {
 
   static_assert(Type == CAPTURES || Type == QUIETS || Type == EVASIONS, "Wrong type");
 
+  bool isUrbino = pos.urbino_gating();
+
   for (auto& m : *this)
       if constexpr (Type == CAPTURES)
           m.value =  int(PieceValue[MG][pos.piece_on(to_sq(m))]) * 6
@@ -114,6 +116,7 @@ void MovePicker::score() {
                    + (*captureHistory)[pos.moved_piece(m)][to_sq(m)][type_of(pos.piece_on(to_sq(m)))];
 
       else if constexpr (Type == QUIETS)
+      {
           m.value =      (*mainHistory)[pos.side_to_move()][from_to(m)]
                    +     (*gateHistory)[pos.side_to_move()][gating_square(m)]
                    + 2 * (*continuationHistory[0])[history_slot(pos.moved_piece(m))][to_sq(m)]
@@ -121,6 +124,36 @@ void MovePicker::score() {
                    +     (*continuationHistory[3])[history_slot(pos.moved_piece(m))][to_sq(m)]
                    +     (*continuationHistory[5])[history_slot(pos.moved_piece(m))][to_sq(m)]
                    + (ply < MAX_LPH ? std::min(4, depth / 3) * (*lowPlyHistory)[ply][from_to(m)] : 0);
+
+          // Urbino move ordering heuristics: prefer higher-value buildings and merging moves
+          if (isUrbino && is_gating(m))
+          {
+              PieceType buildingType = gating_type(m);
+              Square buildingSq = gating_square(m);
+
+              // Bonus for building type (towers > palaces > houses)
+              // Tuned values: shallow gradient (slope=250) with high intercept (1500)
+              int buildingBonus = 0;
+              if (buildingType == CUSTOM_PIECE_4)      // Tower
+                  buildingBonus = 2000;
+              else if (buildingType == CUSTOM_PIECE_3) // Palace
+                  buildingBonus = 1750;
+              else if (buildingType == CUSTOM_PIECE_2) // House
+                  buildingBonus = 1500;
+
+              // Bonus for adjacency to existing buildings (potential for merging/scoring)
+              // Tuned value: 750 per adjacent building (dominant factor in move ordering)
+              Bitboard allBuildings = pos.pieces(CUSTOM_PIECE_2) | pos.pieces(CUSTOM_PIECE_3) | pos.pieces(CUSTOM_PIECE_4);
+              Bitboard neighbors = (shift<NORTH>(square_bb(buildingSq)) | shift<SOUTH>(square_bb(buildingSq)) |
+                                   shift<EAST>(square_bb(buildingSq)) | shift<WEST>(square_bb(buildingSq))) & pos.board_bb();
+              int adjacentCount = popcount(neighbors & allBuildings);
+
+              // More adjacent buildings = more potential for scoring (bonus per adjacent building)
+              int adjacencyBonus = adjacentCount * 750;
+
+              m.value += buildingBonus + adjacencyBonus;
+          }
+      }
 
       else // Type == EVASIONS
       {
@@ -221,7 +254,7 @@ top:
               hasGeneratedMoves = true;
 
           score<QUIETS>();
-          partial_insertion_sort(cur, endMoves, -3000 * depth);
+          partial_insertion_sort(cur, endMoves, -4000 * depth);
       }
 
       ++stage;

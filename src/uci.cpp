@@ -415,6 +415,14 @@ void UCI::loop(int argc, char* argv[]) {
               sync_cout << "Draw" << sync_endl;
           */
       }
+      else if (token == "urbinoscores" && pos.urbino_gating()) {
+          // Show detailed Urbino scores with debug output
+          int scoreW, scoreB;
+          pos.urbino_scores(scoreW, scoreB, true);  // debug=true for detailed output
+          sync_cout << "\nUrbino Scores:" << sync_endl;
+          sync_cout << "  White: " << scoreW << sync_endl;
+          sync_cout << "  Black: " << scoreB << sync_endl;
+      }
       else if (token == "compiler") sync_cout << compiler_info() << sync_endl;
       else if (token == "export_net")
       {
