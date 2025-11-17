@@ -445,20 +445,10 @@ Value Eval::evaluate(const Position& pos) {
       int black_towers_in_hand = pos.count_in_hand(BLACK, CUSTOM_PIECE_4);
 
       // Add to scores (multiply by 100 to maintain centipawn scale)
-      int white_hand_bonus = 30 * white_palaces_in_hand + 100 * white_towers_in_hand;
-      int black_hand_bonus = 30 * black_palaces_in_hand + 100 * black_towers_in_hand;
-      
-      /*
-      // Phase-dependent tower bonus: starts at 250 early game, decreases to 0 at ply 15
-      // Strategy: conserve towers early for late-game scoring swings
-      int ply = pos.game_ply();
-      int tower_bonus_per_tower = (ply >= 15) ? 0 : 250 * (15 - ply) / 15;
-
-      // Add to scores (multiply by 100 to maintain centipawn scale)
       // Palace penalty removed - palaces rarely fully depleted in practice
-      int white_hand_bonus = tower_bonus_per_tower * white_towers_in_hand;
-      int black_hand_bonus = tower_bonus_per_tower * black_towers_in_hand;
-      */
+      int white_hand_bonus = 30 * white_palaces_in_hand + 175 * white_towers_in_hand;
+      int black_hand_bonus = 30 * black_palaces_in_hand + 175 * black_towers_in_hand;
+
       v = Value((white_score - black_score) * 100 + white_hand_bonus - black_hand_bonus);
       return pos.side_to_move() == WHITE ? v : -v;
   }
